@@ -31,3 +31,38 @@ jobs:
         with:
           name: RepeatRemind-release-unsigned
           path: app/build/outputs/apk/release/app-release-unsigned.apk
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RepeatRemind-debug-apk
+          path: dist/debug
+      - uses: actions/download-artifact@v4
+        with:
+          name: RepeatRemind-release-unsigned
+          path: dist/release
+      - name: Publish APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: build-${{ github.run_number }}.${{ github.run_attempt }}
+        run: |
+          cp dist/debug/app-debug.apk dist/RepeatRemind-debug.apk
+          cp dist/release/app-release-unsigned.apk dist/RepeatRemind-release-unsigned.apk
+          cat > release-notes.md <<'NOTES'
+          Automatically built and checked by GitHub Actions.
+
+          - **RepeatRemind-debug.apk**: installable debug build for Android 8.0+.
+          - **RepeatRemind-release-unsigned.apk**: optimized unsigned build; sign it before installing or distributing.
+          NOTES
+          gh release create "$RELEASE_TAG" \
+            dist/RepeatRemind-debug.apk dist/RepeatRemind-release-unsigned.apk \
+            --target "$GITHUB_SHA" \
+            --title "RepeatRemind $RELEASE_TAG" \
+            --notes-file release-notes.md --latest

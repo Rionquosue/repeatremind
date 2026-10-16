@@ -62,6 +62,11 @@ The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installe
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
 sign it with your own private key before distributing. Never commit signing keys.
 The GitHub Actions workflow builds both APKs on pushes to main and uploads them as artifacts.
+After checks pass, it also publishes both APKs on the repository's **Releases** page.
+Release tags use `build-<run number>.<attempt>` so retries get their own release.
+Manual workflow runs on main also publish; pull requests only build and test.
+Download `RepeatRemind-debug.apk` for direct installation, or sign the optimized
+`RepeatRemind-release-unsigned.apk` with your own key. No signing keys are added to the repository.
 The build downloads tools only on the development machine; the installed app has no network access.
 
 `recurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
