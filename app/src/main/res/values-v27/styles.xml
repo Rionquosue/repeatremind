@@ -1,0 +1,8 @@
+<resources>
+    <style name="Navigation.Light" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Navigation.Dark" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

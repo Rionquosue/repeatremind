@@ -1,0 +1,19 @@
+plugins {
+    id 'com.android.application' version '8.11.1' apply false
+}
+
+tasks.register('compileRecurrenceTests', JavaCompile) {
+    source = files('app/src/main/java/style/spacedragon/repeatremind/Schedule.java',
+            'app/src/main/java/style/spacedragon/repeatremind/Recurrence.java',
+            'tests/RecurrenceTest.java')
+    classpath = files()
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    destinationDirectory = layout.buildDirectory.dir('recurrence-tests')
+    options.release = 17
+}
+tasks.register('recurrenceTest', JavaExec) {
+    dependsOn 'compileRecurrenceTests'
+    classpath = files(layout.buildDirectory.dir('recurrence-tests'))
+    mainClass = 'style.spacedragon.repeatremind.RecurrenceTest'
+}

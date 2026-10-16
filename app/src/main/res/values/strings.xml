@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">RepeatRemind</string>
+    <string name="reminder_channel">Task reminders</string>
+    <string name="strict_biweekly">Strict · every 14 days</string>
+    <string name="calendar_biweekly">Selected days of each month</string>
+    <string name="add_reminder">Add reminder</string>
+    <string name="task_enabled">Task enabled</string>
+</resources>
