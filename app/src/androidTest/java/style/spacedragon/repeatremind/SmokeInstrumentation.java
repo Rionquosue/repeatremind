@@ -2,6 +2,7 @@ package style.spacedragon.repeatremind;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.app.Notification;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
@@ -12,6 +13,7 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.NumberPicker;
 import android.widget.Spinner;
@@ -23,6 +25,8 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import org.json.JSONObject;
 
 /** Framework-only device smoke tests. Run on a disposable emulator, not a personal phone. */
 public final class SmokeInstrumentation extends Instrumentation {
@@ -80,6 +84,10 @@ public final class SmokeInstrumentation extends Instrumentation {
                 EditText notification = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
                         && "Defaults to task name".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
                 notification.setText("Custom notification text");
+                ((Switch) findText(editor, "Send additional reminders if not complete")).setChecked(true);
+                EditText interval = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
+                        && "Interval".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
+                interval.setText("2");
             });
             waitForIdleSync(); screenshot("smoke-editor.png");
             runOnMainSync(() -> {
@@ -92,7 +100,20 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(task.schedule.kind == Schedule.Kind.MONTHLY && task.schedule.day == 31, "Monthly day persisted");
             check(task.reminder.equals("Custom notification text"), "Custom notification text persisted");
             check(task.nextDue > System.currentTimeMillis(), "Future alarm persisted");
+            check(task.followUpEnabled && task.followUpMinutes == 120, "Follow-up interval persisted in minutes");
             check(findText(main, "+") != null, "Compact plus button after save");
+            check(findText(main, "Completed") instanceof CheckBox, "Native Completed checkbox exists");
+            runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
+            check(store.load().get(0).completed, "List checkbox completes occurrence");
+            runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
+            check(!store.load().get(0).completed, "List checkbox can undo completion");
+
+            JSONObject legacy = task.toJson();
+            for (String key : new String[]{"followUpEnabled", "followUpMinutes", "completed", "ignored",
+                    "followUpAt", "occurrenceDate", "occurrenceId", "occurrenceStarted"}) legacy.remove(key);
+            Task migrated = Task.fromJson(legacy);
+            check(!migrated.completed && !migrated.ignored && !migrated.followUpEnabled
+                    && migrated.followUpMinutes == 60 && migrated.title.equals(task.title), "Old tasks migrate safely");
 
             // Both tasks due at once must post in a single wake-up, even with the activity closed.
             runOnMainSync(main::finish); waitForIdleSync();
@@ -111,17 +132,39 @@ public final class SmokeInstrumentation extends Instrumentation {
             long next = tasks.get(0).nextDue;
             Reminders.reconcile(context, false);
             check(store.load().get(0).nextDue == next, "Repeated reconciliation does not skip a future occurrence");
+            Notification first = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == task.id)
+                    .findFirst().orElseThrow().getNotification();
+            check(first.actions.length == 2 && "Completed".contentEquals(first.actions[0].title)
+                    && "Ignore".contentEquals(first.actions[1].title), "Expanded notification has both actions");
+            first.actions[0].actionIntent.send();
+            await(() -> store.load().get(0).completed, "Notification Completed action persisted");
+            check(store.load().get(0).followUpAt == 0, "Notification completion cancels follow-ups");
+            check(Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
+                    "Completion dismisses notification");
+            Notification other = Arrays.stream(notifications.getActiveNotifications()).findFirst().orElseThrow().getNotification();
+            other.actions[1].actionIntent.send();
+            await(() -> store.load().get(1).ignored, "Notification Ignore action persisted");
+            check(!store.load().get(1).completed && store.load().get(1).nextAlarm() == Long.MAX_VALUE,
+                    "Ignore silences without completion");
 
             // Exercise the real OS delivery path, with no activity running.
             notifications.cancelAll();
             tasks = store.load(); tasks.remove(1);
-            tasks.get(0).nextDue = System.currentTimeMillis() + 3000; store.save(tasks);
+            Task fresh = tasks.get(0);
+            fresh.nextDue = System.currentTimeMillis() + 3000;
+            fresh.occurrenceDate = null; fresh.occurrenceStarted = false; fresh.completed = false; fresh.followUpAt = 0;
+            store.save(tasks);
             Reminders.reconcile(context, false);
             long timeout = System.currentTimeMillis() + 20000;
             while (notifications.getActiveNotifications().length == 0 && System.currentTimeMillis() < timeout) {
                 Thread.sleep(250);
             }
             check(notifications.getActiveNotifications().length == 1, "AlarmManager delivered after activity closed");
+            first.actions[0].actionIntent.send(); waitForIdleSync();
+            check(!store.load().get(0).completed, "Old notification cannot complete a new occurrence");
+            Notification current = notifications.getActiveNotifications()[0].getNotification();
+            current.actions[1].actionIntent.send();
+            await(() -> store.load().get(0).ignored, "Current notification Ignore works");
             notifications.cancelAll();
             for (int theme = 0; theme < 3; theme++) {
                 store.theme(theme);
@@ -129,6 +172,11 @@ public final class SmokeInstrumentation extends Instrumentation {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 waitForIdleSync();
                 check(findText(themed, "Monthly smoke test") != null, "Theme " + theme + " renders tasks");
+                check(findText(themed, "Completed") instanceof CheckBox, "Theme " + theme + " has completion control");
+                if (theme == 0) {
+                    runOnMainSync(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
+                    check(!store.load().get(0).ignored && store.load().get(0).followUpAt > 0, "Resume restores follow-ups");
+                }
                 screenshot("smoke-theme-" + theme + ".png");
                 runOnMainSync(themed::finish); waitForIdleSync();
             }
@@ -145,6 +193,12 @@ public final class SmokeInstrumentation extends Instrumentation {
         status.putString("stream", result.getString("stream"));
         sendStatus(resultCode == Activity.RESULT_OK ? 0 : -2, status);
         finish(resultCode, result);
+    }
+
+    private void await(BooleanSupplier condition, String description) throws Exception {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) Thread.sleep(25);
+        waitForIdleSync(); check(condition.getAsBoolean(), description);
     }
 
     private void shell(String command) throws Exception {

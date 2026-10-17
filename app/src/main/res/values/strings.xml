@@ -5,4 +5,9 @@
     <string name="calendar_biweekly">Selected days of each month</string>
     <string name="add_reminder">Add reminder</string>
     <string name="task_enabled">Task enabled</string>
+    <string name="completed">Completed</string>
+    <string name="ignore">Ignore</string>
+    <string name="resume_reminders">Resume reminders</string>
+    <string name="additional_reminders">Send additional reminders if not complete</string>
+    <string name="ignore_reminders">Ignore reminders until re-enabled</string>
 </resources>

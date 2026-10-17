@@ -4,19 +4,19 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import java.time.LocalDate;
 
-final class Task {
+final class Task extends TaskState {
     int id;
     String title = "";
     String reminder = "";
-    boolean hasReminder;
-    boolean enabled = true;
-    long nextDue;
-    Schedule schedule = new Schedule();
 
     JSONObject toJson() throws JSONException {
         Schedule s = schedule;
         return new JSONObject().put("id", id).put("title", title).put("reminder", reminder)
                 .put("hasReminder", hasReminder).put("enabled", enabled).put("nextDue", nextDue)
+                .put("followUpEnabled", followUpEnabled).put("followUpMinutes", followUpMinutes)
+                .put("completed", completed).put("ignored", ignored).put("followUpAt", followUpAt)
+                .put("occurrenceDate", occurrenceDate == null ? "" : occurrenceDate.toString())
+                .put("occurrenceId", occurrenceId).put("occurrenceStarted", occurrenceStarted)
                 .put("kind", s.kind.name()).put("start", s.start.toString())
                 .put("weekdays", s.weekdays).put("monthDays", s.monthDays)
                 .put("day", s.day).put("month", s.month).put("hour", s.hour).put("minute", s.minute);
@@ -34,6 +34,15 @@ final class Task {
         t.hasReminder = json.getBoolean("hasReminder");
         t.enabled = json.getBoolean("enabled");
         t.nextDue = json.getLong("nextDue");
+        t.followUpEnabled = json.optBoolean("followUpEnabled", false);
+        t.followUpMinutes = json.optInt("followUpMinutes", 60);
+        t.completed = json.optBoolean("completed", false);
+        t.ignored = json.optBoolean("ignored", false);
+        t.followUpAt = json.optLong("followUpAt", 0);
+        t.occurrenceId = json.optLong("occurrenceId", 0);
+        t.occurrenceStarted = json.optBoolean("occurrenceStarted", false);
+        String date = json.optString("occurrenceDate", "");
+        t.occurrenceDate = date.isEmpty() ? null : LocalDate.parse(date);
         Schedule s = t.schedule;
         s.kind = Schedule.Kind.valueOf(json.getString("kind"));
         s.start = LocalDate.parse(json.getString("start"));
@@ -43,7 +52,7 @@ final class Task {
         s.month = json.getInt("month");
         s.hour = json.getInt("hour");
         s.minute = json.getInt("minute");
-        if (validate) s.validate();
+        if (validate) t.validate();
         return t;
     }
 }

@@ -15,6 +15,19 @@ final class Schedule {
     int hour = 9;
     int minute = 0;
 
+    Schedule copy() {
+        Schedule copy = new Schedule();
+        copy.kind = kind; copy.start = start; copy.weekdays = weekdays; copy.monthDays = monthDays;
+        copy.day = day; copy.month = month; copy.hour = hour; copy.minute = minute;
+        return copy;
+    }
+
+    boolean sameAs(Schedule other) {
+        return kind == other.kind && start.equals(other.start) && weekdays == other.weekdays
+                && monthDays == other.monthDays && day == other.day && month == other.month
+                && hour == other.hour && minute == other.minute;
+    }
+
     void validate() {
         if (kind == null || start == null || hour < 0 || hour > 23 || minute < 0
                 || minute > 59 || day < 1 || day > 31 || month < 1 || month > 12) {

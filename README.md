@@ -17,6 +17,16 @@ Android cloud backup and device transfer are disabled.
   for later months. February 29 yearly reminders use February 28 outside leap years.
 - Enable **Add reminder**, enter notification text, and select a local reminder time.
   Blank notification text defaults to the task name. Tasks can exist without a notification.
+- Check **Completed** in the list or expand a notification and tap **Completed**. This clears
+  the notification and stops follow-ups for that occurrence. Completion resets at the next
+  scheduled occurrence. Completing an upcoming occurrence early skips its reminder.
+- Enable **Send additional reminders if not complete** and choose a wait in minutes, hours,
+  or days (1 minute to 365 days). Each delivered reminder starts another wait. Regular calendar
+  occurrences keep their original schedule; a new occurrence replaces an older unfinished one.
+- **Ignore** in the list or expanded notification silences all reminders for that task until
+  **Resume** is selected, without marking it complete. The editor also has an Ignore checkbox.
+  Swiping away a notification or opening it does not stop follow-ups. Unchecking Completed
+  resumes follow-ups for an occurrence that has already started, after the configured wait.
 - Tap a task to edit, pause, or delete it. **Theme** selects Light, Dark, or Colourblind.
   Selected weekdays have checkmarks as well as highlighted backgrounds.
 - The start date is the earliest allowed occurrence. All dates use the phone's native local time.
@@ -36,11 +46,14 @@ buttons above the list. If precise access is declined, reminders still use appro
 Android may delay them. The app never requests network, contacts, location, shared storage,
 wake-lock, battery exemption, or foreground-service permissions.
 
-One AlarmManager alarm is scheduled for the earliest due task. The receiver posts all due
+One AlarmManager alarm is scheduled for the earliest base reminder or follow-up. The receiver posts all due
 notifications and schedules the next occurrence, then exits. It does not poll or keep a process
 running. Reboot, clock/timezone changes, and app updates reschedule reminders. A late alarm
 or reboot produces at most one catch-up notification per task, not a backlog. A skipped local
 DST time moves forward by the gap; a repeated hour generates one occurrence, using its first offset.
+Completion, Ignore, and pending follow-ups persist across process exits and reboot. Existing saved
+tasks migrate automatically with additional reminders switched off. Very short follow-up intervals
+can be delayed by Android's idle-mode alarm limits, even with precise reminder access.
 
 Android/OEM restrictions still apply. Force-stopping the app blocks its alarms and boot receiver
 until you launch it again. Notification access, channel settings, Do Not Disturb and manufacturer
@@ -54,7 +67,7 @@ Open in Android Studio, or use JDK 17 and the Android SDK:
 
 ```sh
 sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-./gradlew recurrenceTest lintDebug assembleDebug assembleRelease
+./gradlew recurrenceTest reminderStateTest lintDebug assembleDebug assembleRelease assembleAndroidTest
 ```
 
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
@@ -71,5 +84,10 @@ The build downloads tools only on the development machine; the installed app has
 
 `recurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
 covering selected days, leap years, short months, start dates, strict 14-day intervals and DST.
+`reminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
+stale notification actions, clock changes, and unchanged recurrence dates for every schedule.
+The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
+checkboxes, actual notification actions, permissions, and OS alarm delivery on a disposable device.
+CI compiles these device tests; running them requires an emulator or connected test device.
 
 The calendar/hourglass launcher icon is a small native vector with an adaptive-icon wrapper.

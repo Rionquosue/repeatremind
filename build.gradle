@@ -5,12 +5,18 @@ plugins {
 tasks.register('compileRecurrenceTests', JavaCompile) {
     source = files('app/src/main/java/style/spacedragon/repeatremind/Schedule.java',
             'app/src/main/java/style/spacedragon/repeatremind/Recurrence.java',
-            'tests/RecurrenceTest.java')
+            'app/src/main/java/style/spacedragon/repeatremind/TaskState.java',
+            'tests/RecurrenceTest.java', 'tests/ReminderStateTest.java')
     classpath = files()
     sourceCompatibility = '17'
     targetCompatibility = '17'
     destinationDirectory = layout.buildDirectory.dir('recurrence-tests')
     options.release = 17
+}
+tasks.register('reminderStateTest', JavaExec) {
+    dependsOn 'compileRecurrenceTests'
+    classpath = files(layout.buildDirectory.dir('recurrence-tests'))
+    mainClass = 'style.spacedragon.repeatremind.ReminderStateTest'
 }
 tasks.register('recurrenceTest', JavaExec) {
     dependsOn 'compileRecurrenceTests'

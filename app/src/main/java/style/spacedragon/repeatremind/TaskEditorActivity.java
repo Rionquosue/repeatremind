@@ -39,11 +39,13 @@ import java.util.Locale;
 
 public final class TaskEditorActivity extends BaseActivity {
     private Task task;
-    private EditText title, reminderText;
-    private Switch reminderSwitch, enabledSwitch;
-    private Spinner repeat, month;
+    private EditText title, reminderText, intervalInput;
+    private Switch reminderSwitch, enabledSwitch, followUpSwitch;
+    private CheckBox ignoredSwitch;
+    private boolean originalIgnored;
+    private Spinner repeat, month, intervalUnit;
     private NumberPicker day;
-    private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields;
+    private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields, followUpFields;
     private RadioButton strict, calendar;
     private Button startDate, time;
     private final CheckBox[] markers = new CheckBox[3];
@@ -61,6 +63,7 @@ public final class TaskEditorActivity extends BaseActivity {
                         .filter(t -> t.id == id).findFirst().orElse(null);
                 if (task == null) { finish(); return; }
             }
+            originalIgnored = state == null ? task.ignored : state.getBoolean("originalIgnored", task.ignored);
             render();
         } catch (JSONException | RuntimeException e) {
             new AlertDialog.Builder(this).setMessage("This task could not be opened.")
@@ -160,6 +163,35 @@ public final class TaskEditorActivity extends BaseActivity {
             s.hour = hour; s.minute = minute; time.setText(formatTime());
         }, s.hour, s.minute, android.text.format.DateFormat.is24HourFormat(this)).show());
         reminderFields.addView(time);
+
+        followUpSwitch = new Switch(this);
+        followUpSwitch.setText(R.string.additional_reminders); followUpSwitch.setTextColor(palette.text);
+        followUpSwitch.setMinHeight(dp(72)); followUpSwitch.setChecked(task.followUpEnabled);
+        reminderFields.addView(followUpSwitch);
+        followUpFields = column();
+        followUpFields.addView(label("Wait between reminders"));
+        LinearLayout intervalRow = new LinearLayout(this);
+        intervalRow.setGravity(Gravity.CENTER_VERTICAL);
+        int unit = task.followUpMinutes > 0 && task.followUpMinutes % 1440 == 0 ? 2
+                : task.followUpMinutes > 0 && task.followUpMinutes % 60 == 0 ? 1 : 0;
+        intervalInput = input("Interval", String.valueOf(task.followUpMinutes / (unit == 2 ? 1440 : unit == 1 ? 60 : 1)), 6, false);
+        intervalInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        intervalInput.setContentDescription("Wait between reminders");
+        intervalRow.addView(intervalInput, new LinearLayout.LayoutParams(0, -2, 1));
+        intervalUnit = spinner(new String[]{"Minutes", "Hours", "Days"});
+        intervalUnit.setSelection(unit); intervalUnit.setContentDescription("Reminder interval unit");
+        intervalRow.addView(intervalUnit, new LinearLayout.LayoutParams(0, -2, 1));
+        followUpFields.addView(intervalRow);
+        followUpFields.addView(text("Repeat until Completed or Ignore. Android may delay reminders while idle.",
+                13, palette.secondary));
+        followUpFields.setVisibility(task.followUpEnabled ? View.VISIBLE : View.GONE);
+        reminderFields.addView(followUpFields);
+        followUpSwitch.setOnCheckedChangeListener((button, checked) ->
+                followUpFields.setVisibility(checked ? View.VISIBLE : View.GONE));
+        ignoredSwitch = new CheckBox(this);
+        ignoredSwitch.setText(R.string.ignore_reminders); ignoredSwitch.setTextColor(palette.text);
+        ignoredSwitch.setMinHeight(dp(64)); ignoredSwitch.setChecked(task.ignored);
+        reminderFields.addView(ignoredSwitch);
         form.addView(reminderFields);
         reminderFields.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
         reminderSwitch.setOnCheckedChangeListener((button, checked) ->
@@ -275,26 +307,49 @@ public final class TaskEditorActivity extends BaseActivity {
         task.title = title.getText().toString().trim();
         task.reminder = reminderText.getText().toString().trim();
         task.hasReminder = reminderSwitch.isChecked(); task.enabled = enabledSwitch.isChecked();
+        task.followUpEnabled = followUpSwitch.isChecked();
+        task.followUpMinutes = intervalMinutes(); task.ignored = ignoredSwitch.isChecked();
         task.schedule.day = day.getValue(); task.schedule.month = month.getSelectedItemPosition() + 1;
         task.schedule.monthDays = 0;
         for (int i = 0; i < 3; i++) if (markers[i].isChecked()) task.schedule.monthDays |= 1 << i;
     }
 
+    private int intervalMinutes() {
+        try {
+            long value = Long.parseLong(intervalInput.getText().toString().trim());
+            value *= intervalUnit.getSelectedItemPosition() == 2 ? 1440 : intervalUnit.getSelectedItemPosition() == 1 ? 60 : 1;
+            return value >= 1 && value <= TaskState.MAX_FOLLOW_UP_MINUTES ? (int) value : 0;
+        } catch (NumberFormatException e) { return 0; }
+    }
+
     private void save() {
         capture();
         if (task.title.isEmpty()) { title.setError("Enter a task name"); title.requestFocus(); return; }
+        if (task.followUpEnabled && task.followUpMinutes == 0) {
+            reminderSwitch.setChecked(true);
+            intervalInput.setError("Enter an interval from 1 minute to 365 days");
+            intervalInput.requestFocus(); return;
+        }
         try {
-            task.schedule.validate();
+            task.validate();
             if (task.hasReminder && task.reminder.isEmpty()) task.reminder = task.title;
+            Reminders.reconcile(this, false);
             TaskStore store = new TaskStore(this);
             List<Task> tasks = store.load();
-            if (task.id == 0) task.id = store.nextId(tasks);
-            int replaceId = task.id;
-            tasks.removeIf(t -> t.id == replaceId);
-            task.nextDue = task.hasReminder && task.enabled ? Recurrence.nextAfter(task.schedule,
-                    Instant.now(), ZoneId.systemDefault()).toEpochMilli() : 0;
-            tasks.add(task); store.save(tasks);
-            Reminders.clear(this, task.id); Reminders.reconcile(this, false); finish();
+            Task current;
+            if (task.id == 0) {
+                current = new Task(); current.id = store.nextId(tasks); tasks.add(current);
+            } else {
+                current = tasks.stream().filter(t -> t.id == task.id).findFirst()
+                        .orElseThrow(() -> new IllegalStateException("This task was deleted while it was being edited"));
+            }
+            Instant now = Instant.now();
+            current.configureFrom(task, now, ZoneId.systemDefault());
+            current.title = task.title; current.reminder = task.reminder;
+            // Preserve a notification action received while this form was open.
+            if (task.ignored != originalIgnored) current.setIgnored(task.ignored, now);
+            store.save(tasks);
+            Reminders.clear(this, current.id); Reminders.reconcile(this, false); finish();
         } catch (IllegalArgumentException e) {
             new AlertDialog.Builder(this).setMessage(e.getMessage()).setPositiveButton("OK", null).show();
         } catch (RuntimeException e) { error(e); }
@@ -315,6 +370,7 @@ public final class TaskEditorActivity extends BaseActivity {
         super.onSaveInstanceState(state);
         if (title == null) return;
         capture();
+        state.putBoolean("originalIgnored", originalIgnored);
         try { state.putString("draft", task.toJson().toString()); }
         catch (JSONException e) { throw new IllegalStateException(e); }
     }

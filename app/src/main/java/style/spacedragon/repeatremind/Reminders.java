@@ -9,10 +9,13 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Icon;
+import android.net.Uri;
 import android.os.Build;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.ArrayList;
 
 final class Reminders {
     private static final String CHANNEL = "task_reminders";
@@ -53,20 +56,16 @@ final class Reminders {
         ZoneId zone = ZoneId.systemDefault();
         long earliest = Long.MAX_VALUE;
         boolean changed = false;
+        List<Task> due = new ArrayList<>();
         for (Task task : tasks) {
-            if (!task.enabled || !task.hasReminder) continue;
-            if (clockChanged || task.nextDue == 0) {
-                task.nextDue = Recurrence.nextAfter(task.schedule, now, zone).toEpochMilli();
-                changed = true;
-            } else if (task.nextDue <= now.toEpochMilli()) {
-                if (allowed(context)) show(context, task);
-                // Delays and closed-app periods produce at most one catch-up notification per task.
-                task.nextDue = Recurrence.nextAfter(task.schedule, now, zone).toEpochMilli();
-                changed = true;
-            }
-            earliest = Math.min(earliest, task.nextDue);
+            TaskState.Update update = task.update(now, zone, clockChanged);
+            changed |= update.changed;
+            if (update.clearNotification || !task.remindersActive() || task.completed) clear(context, task.id);
+            if (update.notify) due.add(task);
+            earliest = Math.min(earliest, task.nextAlarm());
         }
         if (changed) store.save(tasks);
+        if (allowed(context)) for (Task task : due) show(context, task);
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
         PendingIntent operation = PendingIntent.getBroadcast(context, 0,
                 new Intent(context, ReminderReceiver.class),
@@ -90,6 +89,40 @@ final class Reminders {
         context.getSystemService(NotificationManager.class).cancel(id);
     }
 
+    static boolean setCompleted(Context context, int id, long occurrence, boolean value) {
+        reconcile(context, false);
+        TaskStore store = new TaskStore(context);
+        List<Task> tasks = store.load();
+        for (Task task : tasks) {
+            if (task.id == id && task.setCompleted(occurrence, value, Instant.now())) {
+                store.save(tasks); clear(context, id); reconcile(context, false); return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean setIgnored(Context context, int id, long occurrence, boolean value) {
+        reconcile(context, false);
+        TaskStore store = new TaskStore(context);
+        List<Task> tasks = store.load();
+        for (Task task : tasks) {
+            if (task.id != id || (occurrence != -1 && task.occurrenceId != occurrence)) continue;
+            task.setIgnored(value, Instant.now());
+            store.save(tasks); clear(context, id); reconcile(context, false); return true;
+        }
+        return false;
+    }
+
+    private static Notification.Action action(Context context, Task task, String action, int title, int icon) {
+        Intent intent = new Intent(context, TaskActionReceiver.class).setAction(action)
+                .setData(Uri.parse("repeatremind://task/" + task.id + "/" + task.occurrenceId))
+                .putExtra("task_id", task.id).putExtra("occurrence_id", task.occurrenceId);
+        PendingIntent pending = PendingIntent.getBroadcast(context, task.id, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Action.Builder(Icon.createWithResource(context, icon),
+                context.getString(title), pending).build();
+    }
+
     private static void show(Context context, Task task) {
         Intent intent = new Intent(context, MainActivity.class)
                 .putExtra("task_id", task.id).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -100,6 +133,10 @@ final class Reminders {
                 .setContentText(task.reminder).setStyle(new Notification.BigTextStyle().bigText(task.reminder))
                 .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(false)
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .addAction(action(context, task, TaskActionReceiver.COMPLETE, R.string.completed,
+                        android.R.drawable.checkbox_on_background))
+                .addAction(action(context, task, TaskActionReceiver.IGNORE, R.string.ignore,
+                        android.R.drawable.ic_menu_close_clear_cancel))
                 .setCategory(Notification.CATEGORY_REMINDER).build();
         try {
             context.getSystemService(NotificationManager.class).notify(task.id, notification);

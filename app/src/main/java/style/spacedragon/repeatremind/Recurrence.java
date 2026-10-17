@@ -8,6 +8,17 @@ import java.time.temporal.ChronoUnit;
 final class Recurrence {
     private Recurrence() { }
 
+    static Instant previousOrAt(Schedule s, Instant at, ZoneId zone) {
+        s.validate();
+        LocalDate date = at.atZone(zone).toLocalDate();
+        for (int i = 0; i <= 366 && !date.isBefore(s.start); i++, date = date.minusDays(1)) {
+            if (!matches(s, date)) continue;
+            Instant candidate = date.atTime(s.hour, s.minute).atZone(zone).toInstant();
+            if (!candidate.isAfter(at)) return candidate;
+        }
+        return null;
+    }
+
     /** Strictly after the instant supplied; always uses local calendar days, never 24h multiples. */
     static Instant nextAfter(Schedule s, Instant after, ZoneId zone) {
         s.validate();

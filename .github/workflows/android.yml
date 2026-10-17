@@ -22,7 +22,7 @@ jobs:
       - name: Install SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - name: Test, lint, and build
-        run: ./gradlew recurrenceTest lintDebug assembleDebug assembleRelease --no-daemon
+        run: ./gradlew recurrenceTest reminderStateTest lintDebug assembleDebug assembleRelease assembleAndroidTest --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: RepeatRemind-debug-apk
@@ -57,6 +57,8 @@ jobs:
           cp dist/release/app-release-unsigned.apk dist/RepeatRemind-release-unsigned.apk
           cat > release-notes.md <<'NOTES'
           Automatically built and checked by GitHub Actions.
+
+          Version 1.1.0 adds Completed checkboxes, notification actions, and optional repeat reminders until Completed or Ignore. Ignore silences a task's reminders until Resume is selected.
 
           - **RepeatRemind-debug.apk**: installable debug build for Android 8.0+.
           - **RepeatRemind-release-unsigned.apk**: optimized unsigned build; sign it before installing or distributing.
