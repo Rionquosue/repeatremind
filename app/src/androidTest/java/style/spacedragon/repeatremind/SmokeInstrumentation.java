@@ -149,9 +149,11 @@ public final class SmokeInstrumentation extends Instrumentation {
             tasks.add(second); store.save(tasks);
             new ReminderReceiver().onReceive(context, new Intent());
             NotificationManager notifications = context.getSystemService(NotificationManager.class);
-            await(() -> notifications.getActiveNotifications().length == 2, "Both simultaneous reminders delivered");
+            await(() -> Arrays.stream(notifications.getActiveNotifications())
+                    .filter(n -> n.getId() == task.id || n.getId() == second.id).count() == 2,
+                    "Both simultaneous reminders delivered");
             check(Arrays.stream(notifications.getActiveNotifications()).anyMatch(n ->
-                    "Custom notification text".contentEquals(n.getNotification().extras.getCharSequence("android.text"))),
+                    "Custom notification text".equals(String.valueOf(n.getNotification().extras.getCharSequence("android.text")))),
                     "Notification contains custom text");
             tasks = store.load();
             check(tasks.stream().allMatch(t -> t.nextDue > System.currentTimeMillis()), "Late alarms advance");
@@ -169,7 +171,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(Boolean.TRUE.equals(persisted.history.get(persisted.occurrenceDate)), "Notification completion history survives JSON round trip");
             await(() -> Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
                     "Completion dismisses notification");
-            Notification other = Arrays.stream(notifications.getActiveNotifications()).findFirst().orElseThrow().getNotification();
+            Notification other = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == second.id)
+                    .findFirst().orElseThrow().getNotification();
             other.actions[1].actionIntent.send();
             await(() -> store.load().get(1).ignored, "Notification Ignore action persisted");
             check(!store.load().get(1).completed && store.load().get(1).nextAlarm() == Long.MAX_VALUE,
@@ -177,6 +180,8 @@ public final class SmokeInstrumentation extends Instrumentation {
 
             // Exercise the real OS delivery path, with no activity running.
             notifications.cancelAll();
+            await(() -> Arrays.stream(notifications.getActiveNotifications())
+                    .noneMatch(n -> n.getId() == task.id || n.getId() == second.id), "Task notifications cleared before OS delivery test");
             tasks = store.load(); tasks.remove(1);
             Task fresh = tasks.get(0);
             fresh.nextDue = System.currentTimeMillis() + 3000;
@@ -185,13 +190,16 @@ public final class SmokeInstrumentation extends Instrumentation {
             store.save(tasks);
             Reminders.reconcile(context, false);
             long timeout = System.currentTimeMillis() + 20000;
-            while (notifications.getActiveNotifications().length == 0 && System.currentTimeMillis() < timeout) {
+            while (Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id)
+                    && System.currentTimeMillis() < timeout) {
                 Thread.sleep(250);
             }
-            check(notifications.getActiveNotifications().length == 1, "AlarmManager delivered after activity closed");
+            check(Arrays.stream(notifications.getActiveNotifications()).anyMatch(n -> n.getId() == task.id),
+                    "AlarmManager delivered after activity closed");
             first.actions[0].actionIntent.send(); waitForIdleSync();
             check(!store.load().get(0).completed, "Old notification cannot complete a new occurrence");
-            Notification current = notifications.getActiveNotifications()[0].getNotification();
+            Notification current = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == task.id)
+                    .findFirst().orElseThrow().getNotification();
             current.actions[1].actionIntent.send();
             await(() -> store.load().get(0).ignored, "Current notification Ignore works");
             notifications.cancelAll();
