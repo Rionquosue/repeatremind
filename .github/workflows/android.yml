@@ -51,6 +51,8 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation | tee smoke-results.txt
+            adb logcat -d -b crash > smoke-crash.txt
+            cat smoke-crash.txt
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-missed.png > smoke-missed.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-custom.png > smoke-custom.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-editor.png > smoke-editor.png
@@ -63,6 +65,7 @@ jobs:
           name: Android-test-results
           path: |
             smoke-results.txt
+            smoke-crash.txt
             smoke-*.png
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
@@ -112,3 +115,11 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "RepeatRemind $RELEASE_TAG" \
             --notes-file release-notes.md --latest
+      - name: Verify published release and APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isDraft,assets > published-release.json
+          jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false and (.assets | length) == 1 and .assets[0].name == "RepeatRemind-release-unsigned.apk" and .assets[0].size > 0' published-release.json

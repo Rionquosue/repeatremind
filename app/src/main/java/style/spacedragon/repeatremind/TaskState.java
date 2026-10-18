@@ -94,6 +94,15 @@ class TaskState {
             beginOccurrence(Instant.ofEpochMilli(nextDue).atZone(zone).toLocalDate());
             result.changed = true;
         }
+        if (historyThrough == null && occurrenceDate.isAfter(today) && Recurrence.matches(schedule, today)) {
+            // Older versions assigned today's button to tomorrow when created after reminder time.
+            // Move that state onto today so its completion can roll over at the next midnight.
+            occurrenceDate = today;
+            occurrenceId++;
+            occurrenceStarted = false;
+            followUpAt = 0;
+            result.changed = true;
+        }
         result.changed |= archiveBefore(today);
         LocalDate currentDate = Recurrence.previousDate(schedule, today);
         if (currentDate != null && currentDate.isAfter(occurrenceDate)) {

@@ -65,10 +65,10 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(findText(main, "+  Add repeating task") != null, "Empty add button");
             screenshot("smoke-empty.png");
             ActivityMonitor monitor = addMonitor(TaskEditorActivity.class.getName(), null, false);
-            runOnMainSync(() -> findText(main, "+  Add repeating task").performClick());
+            ui(() -> findText(main, "+  Add repeating task").performClick());
             Activity editor = waitForMonitorWithTimeout(monitor, 15000); removeMonitor(monitor);
             check(editor != null, "Editor opened"); waitForIdleSync();
-            runOnMainSync(() -> {
+            ui(() -> {
                 EditText title = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
                         && "Task name".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
                 title.setText("Monthly smoke test");
@@ -78,7 +78,8 @@ public final class SmokeInstrumentation extends Instrumentation {
                 repeat.setSelection(1);
             });
             waitForIdleSync();
-            runOnMainSync(() -> {
+            await(() -> findText(editor, "MON") != null && findText(editor, "MON").getHeight() > 0, "Weekday layout ready");
+            ui(() -> {
                 Button monday = (Button) findText(editor, "MON");
                 int height = monday.getHeight();
                 int top = monday.getTop();
@@ -91,7 +92,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                 repeat.setSelection(4);
             });
             waitForIdleSync();
-            runOnMainSync(() -> {
+            ui(() -> {
                 flatten(editor).stream().filter(v -> v instanceof NumberPicker)
                         .map(v -> (NumberPicker) v).findFirst().orElseThrow().setValue(31);
                 ((Switch) findText(editor, "Add reminder")).setChecked(true);
@@ -104,7 +105,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                 interval.setText("2");
             });
             waitForIdleSync(); screenshot("smoke-editor.png");
-            runOnMainSync(() -> {
+            ui(() -> {
                 findText(editor, "Save task").performClick();
             });
             waitForIdleSync();
@@ -117,9 +118,9 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(task.followUpEnabled && task.followUpMinutes == 120, "Follow-up interval persisted in minutes");
             check(findText(main, "+") != null, "Compact plus button after save");
             check(findText(main, "Completed") instanceof Button, "Native Completed button exists");
-            runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
+            ui(() -> findText(main, "Completed").performClick()); waitForIdleSync();
             check(store.load().get(0).completed && findText(main, "Completed").isSelected(), "Completed button saves and highlights");
-            runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
+            ui(() -> findText(main, "Completed").performClick()); waitForIdleSync();
             check(!store.load().get(0).completed, "Completed button can undo completion");
 
             JSONObject legacy = task.toJson();
@@ -130,7 +131,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                     && migrated.followUpMinutes == 60 && migrated.title.equals(task.title), "Old tasks migrate safely");
 
             // Both tasks due at once must post in a single wake-up, even with the activity closed.
-            runOnMainSync(main::finish); waitForIdleSync();
+            ui(main::finish); waitForIdleSync();
             task.schedule.kind = Schedule.Kind.EVERY_DAY;
             task.occurrenceDate = LocalDate.now();
             task.nextDue = System.currentTimeMillis() - 1000;
@@ -139,7 +140,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             tasks.add(second); store.save(tasks);
             new ReminderReceiver().onReceive(context, new Intent());
             NotificationManager notifications = context.getSystemService(NotificationManager.class);
-            check(notifications.getActiveNotifications().length == 2, "Both simultaneous reminders delivered");
+            await(() -> notifications.getActiveNotifications().length == 2, "Both simultaneous reminders delivered");
             check(Arrays.stream(notifications.getActiveNotifications()).anyMatch(n ->
                     "Custom notification text".contentEquals(n.getNotification().extras.getCharSequence("android.text"))),
                     "Notification contains custom text");
@@ -193,11 +194,11 @@ public final class SmokeInstrumentation extends Instrumentation {
                 check(findText(themed, "Monthly smoke test") != null, "Theme " + theme + " renders tasks");
                 check(findText(themed, "Completed") instanceof Button, "Theme " + theme + " has completion control");
                 if (theme == 0) {
-                    runOnMainSync(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
+                    ui(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
                     check(!store.load().get(0).ignored && store.load().get(0).followUpAt > 0, "Resume restores follow-ups");
                 }
                 screenshot("smoke-theme-" + theme + ".png");
-                runOnMainSync(themed::finish); waitForIdleSync();
+                ui(themed::finish); waitForIdleSync();
             }
 
             // Exercise rollover and history through the real activity/store, without changing the device clock.
@@ -213,17 +214,17 @@ public final class SmokeInstrumentation extends Instrumentation {
             Activity history = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             check(store.load().stream().noneMatch(t -> t.completed), "Activity rolls yesterday's completion over before reminder time");
-            runOnMainSync(() -> findText(history, "Missed days").performClick()); waitForIdleSync();
+            ui(() -> findText(history, "Missed days").performClick()); waitForIdleSync();
             check(findText(history, "Missed history test") != null, "Missed tab includes incomplete past date");
             check(findText(history, "Daily rollover test") == null && findText(history, "Completed") == null,
                     "Missed tab excludes completed days and current task controls");
-            screenshot("smoke-missed.png"); runOnMainSync(history::finish); waitForIdleSync();
+            screenshot("smoke-missed.png"); ui(history::finish); waitForIdleSync();
 
             Activity custom = startActivitySync(new Intent(context, CustomThemeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             int[] colours = {0xff101010, 0xff123456, 0xffab7612, 0xffefefef};
             String[] labels = {"Background colour", "Button colour", "Highlight colour", "Text colour"};
-            runOnMainSync(() -> {
+            ui(() -> {
                 for (int i = 0; i < labels.length; i++) {
                     final String label = labels[i];
                     EditText field = (EditText) flatten(custom).stream().filter(v -> v instanceof EditText
@@ -239,7 +240,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             Palette applied = ((MainActivity) customMain).palette;
             check(applied.background == colours[0] && applied.button == colours[1]
                     && applied.highlight == colours[2] && applied.text == colours[3], "Custom colours apply after reopening");
-            screenshot("smoke-custom.png"); runOnMainSync(customMain::finish); waitForIdleSync();
+            screenshot("smoke-custom.png"); ui(customMain::finish); waitForIdleSync();
             result.putString("stream", "PASS: " + checks + " Android smoke checks\n");
             resultCode = Activity.RESULT_OK;
         } catch (Throwable failure) {
@@ -254,6 +255,14 @@ public final class SmokeInstrumentation extends Instrumentation {
         status.putString("stream", result.getString("stream"));
         sendStatus(resultCode == Activity.RESULT_OK ? 0 : -2, status);
         finish(resultCode, result);
+    }
+
+    private void ui(Runnable action) {
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        runOnMainSync(() -> {
+            try { action.run(); } catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError("UI action failed", failure.get());
     }
 
     private void await(BooleanSupplier condition, String description) throws Exception {

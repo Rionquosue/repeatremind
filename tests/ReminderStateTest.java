@@ -175,6 +175,14 @@ public final class ReminderStateTest {
         update(t, "2026-01-04T08:00:00Z");
         check(!t.completed && t.history.size() == 1 && Boolean.TRUE.equals(t.history.get(LocalDate.of(2025, 12, 31))),
                 "Migrating a stuck completion resets it without inventing missed history");
+        t = task(); t.occurrenceDate = LocalDate.of(2026, 1, 2); t.occurrenceId = 3; t.completed = true;
+        t.nextDue = at("2026-01-02T09:00:00Z").toEpochMilli();
+        update(t, "2026-01-01T19:00:00Z");
+        check(t.completed && t.occurrenceDate.equals(LocalDate.of(2026, 1, 1)),
+                "Legacy task created after reminder time assigns completion to today");
+        update(t, "2026-01-02T00:00:00Z");
+        check(!t.completed && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))),
+                "Legacy next-reminder completion now rolls over at midnight");
     }
 
     private static void scheduleHistory() {
