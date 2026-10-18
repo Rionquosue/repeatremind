@@ -70,7 +70,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(editor != null, "Editor opened"); waitForIdleSync();
             ui(() -> {
                 EditText title = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
-                        && "Task name".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
+                        && "Task name".equals(String.valueOf(((EditText) v).getHint()))).findFirst().orElseThrow();
                 title.setText("Monthly smoke test");
                 Spinner repeat = flatten(editor).stream().filter(v -> v instanceof Spinner)
                         .map(v -> (Spinner) v).filter(v -> v.getAdapter().getCount() == 6).findFirst().orElseThrow();
@@ -104,11 +104,11 @@ public final class SmokeInstrumentation extends Instrumentation {
                         .map(v -> (NumberPicker) v).findFirst().orElseThrow().setValue(31);
                 ((Switch) findText(editor, "Add reminder")).setChecked(true);
                 EditText notification = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
-                        && "Defaults to task name".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
+                        && "Defaults to task name".equals(String.valueOf(((EditText) v).getHint()))).findFirst().orElseThrow();
                 notification.setText("Custom notification text");
                 ((Switch) findText(editor, "Send additional reminders if not complete")).setChecked(true);
                 EditText interval = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
-                        && "Interval".contentEquals(((EditText) v).getHint())).findFirst().orElseThrow();
+                        && "Interval".equals(String.valueOf(((EditText) v).getHint()))).findFirst().orElseThrow();
                 interval.setText("2");
             });
             waitForIdleSync(); screenshot("smoke-editor.png");
@@ -167,7 +167,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(store.load().get(0).followUpAt == 0, "Notification completion cancels follow-ups");
             Task persisted = Task.fromJson(store.load().get(0).toJson());
             check(Boolean.TRUE.equals(persisted.history.get(persisted.occurrenceDate)), "Notification completion history survives JSON round trip");
-            check(Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
+            await(() -> Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
                     "Completion dismisses notification");
             Notification other = Arrays.stream(notifications.getActiveNotifications()).findFirst().orElseThrow().getNotification();
             other.actions[1].actionIntent.send();
@@ -237,7 +237,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                 for (int i = 0; i < labels.length; i++) {
                     final String label = labels[i];
                     EditText field = (EditText) flatten(custom).stream().filter(v -> v instanceof EditText
-                            && label.contentEquals(v.getContentDescription())).findFirst().orElseThrow();
+                            && label.equals(String.valueOf(v.getContentDescription()))).findFirst().orElseThrow();
                     field.setText(String.format(java.util.Locale.ROOT, "#%06X", colours[i] & 0xffffff));
                 }
                 findText(custom, "Save theme").performClick();
