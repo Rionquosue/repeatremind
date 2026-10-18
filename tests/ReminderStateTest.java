@@ -205,8 +205,20 @@ public final class ReminderStateTest {
         check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Incomplete weekly day is missed after that day ends");
         t.setCompleted(t.occurrenceId, true, at("2026-01-02T08:00:00Z"));
         check(Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Late completion updates the active occurrence's history");
+        t.setCompleted(t.occurrenceId, false, at("2026-01-02T08:01:00Z"));
+        check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Undoing a past completion restores a missed record");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-02T08:02:00Z"));
         update(t, "2026-01-07T23:59:59Z"); check(t.completed, "Weekly completion remains until the next scheduled date");
         update(t, "2026-01-08T00:00:00Z"); check(!t.completed, "Weekly completion resets at scheduled midnight");
+
+        TaskState future = task(); future.schedule.kind = Schedule.Kind.WEEKLY;
+        update(future, "2026-01-02T08:00:00Z");
+        future.setCompleted(future.occurrenceId, true, at("2026-01-02T08:01:00Z"));
+        future.setCompleted(future.occurrenceId, false, at("2026-01-02T08:02:00Z"));
+        TaskState edited = task(); edited.schedule.kind = Schedule.Kind.MONTHLY; edited.schedule.day = 15;
+        future.configureFrom(edited, at("2026-01-02T08:03:00Z"), UTC);
+        update(future, "2026-01-10T08:00:00Z");
+        check(!future.history.containsKey(LocalDate.of(2026, 1, 8)), "Undo and reschedule do not leave a canceled future day marked missed");
 
         for (Schedule.Kind kind : Schedule.Kind.values()) {
             t = task(); t.schedule.kind = kind; t.schedule.day = 31; t.schedule.month = 12;

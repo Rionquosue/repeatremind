@@ -123,7 +123,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(task.reminder.equals("Custom notification text"), "Custom notification text persisted");
             check(task.nextDue > System.currentTimeMillis(), "Future alarm persisted");
             check(task.followUpEnabled && task.followUpMinutes == 120, "Follow-up interval persisted in minutes");
-            check(findText(main, "+") != null, "Compact plus button after save");
+            await(() -> findText(main, "+") != null, "Main activity resumed with compact plus button after save");
             await(() -> findText(main, "Completed") != null, "Task row layout ready");
             check(findText(main, "Completed") instanceof Button, "Native Completed button exists");
             ui(() -> findText(main, "Completed").performClick()); waitForIdleSync();

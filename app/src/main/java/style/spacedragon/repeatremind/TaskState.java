@@ -147,7 +147,9 @@ class TaskState {
     boolean setCompleted(long expectedOccurrence, boolean value, Instant now) {
         if (expectedOccurrence != occurrenceId) return false;
         completed = value;
-        history.put(occurrenceDate, value);
+        if (value || (historyThrough != null && occurrenceDate.isBefore(historyThrough))) {
+            history.put(occurrenceDate, value);
+        } else history.remove(occurrenceDate); // An unfinished current/future date is not a missed record yet.
         resetFollowUp(now);
         return true;
     }
