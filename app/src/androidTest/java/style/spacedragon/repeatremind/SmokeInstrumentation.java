@@ -54,8 +54,8 @@ public final class SmokeInstrumentation extends Instrumentation {
                     "Exactly the three intended permissions");
             shell("pm grant " + context.getPackageName() + " android.permission.POST_NOTIFICATIONS");
             shell("appops set " + context.getPackageName() + " SCHEDULE_EXACT_ALARM allow");
-            check(Reminders.allowed(context), "Notification access granted");
-            check(Reminders.precise(context), "Exact alarm access granted");
+            await(() -> Reminders.allowed(context), "Notification access granted");
+            await(() -> Reminders.precise(context), "Exact alarm access granted");
 
             TaskStore store = new TaskStore(context);
             store.save(new ArrayList<>()); store.theme(0);
