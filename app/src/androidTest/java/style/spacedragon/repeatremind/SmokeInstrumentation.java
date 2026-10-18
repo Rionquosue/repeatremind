@@ -13,13 +13,13 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.NumberPicker;
 import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -44,6 +44,7 @@ public final class SmokeInstrumentation extends Instrumentation {
         String originalTasks = preferences.getString("tasks", "[]");
         int originalTheme = preferences.getInt("theme", 0);
         int originalNext = preferences.getInt("next_id", 1);
+        int[] originalCustom = new TaskStore(context).customColours();
         int resultCode = Activity.RESULT_CANCELED;
         try {
             Set<String> permissions = new HashSet<>(Arrays.asList(context.getPackageManager()
@@ -74,6 +75,19 @@ public final class SmokeInstrumentation extends Instrumentation {
                 Spinner repeat = flatten(editor).stream().filter(v -> v instanceof Spinner)
                         .map(v -> (Spinner) v).filter(v -> v.getAdapter().getCount() == 6).findFirst().orElseThrow();
                 check(repeat.getAdapter().getCount() == 6, "All schedule options available");
+                repeat.setSelection(1);
+            });
+            waitForIdleSync();
+            runOnMainSync(() -> {
+                Button monday = (Button) findText(editor, "MON");
+                int height = monday.getHeight();
+                int top = monday.getTop();
+                monday.performClick();
+                check("MON".contentEquals(monday.getText()) && monday.getLineCount() == 1,
+                        "Selected weekday stays on a single line");
+                check(monday.getHeight() == height && monday.getTop() == top, "Selection does not move or clip the weekday");
+                Spinner repeat = flatten(editor).stream().filter(v -> v instanceof Spinner)
+                        .map(v -> (Spinner) v).filter(v -> v.getAdapter().getCount() == 6).findFirst().orElseThrow();
                 repeat.setSelection(4);
             });
             waitForIdleSync();
@@ -102,21 +116,23 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(task.nextDue > System.currentTimeMillis(), "Future alarm persisted");
             check(task.followUpEnabled && task.followUpMinutes == 120, "Follow-up interval persisted in minutes");
             check(findText(main, "+") != null, "Compact plus button after save");
-            check(findText(main, "Completed") instanceof CheckBox, "Native Completed checkbox exists");
+            check(findText(main, "Completed") instanceof Button, "Native Completed button exists");
             runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
-            check(store.load().get(0).completed, "List checkbox completes occurrence");
+            check(store.load().get(0).completed && findText(main, "Completed").isSelected(), "Completed button saves and highlights");
             runOnMainSync(() -> findText(main, "Completed").performClick()); waitForIdleSync();
-            check(!store.load().get(0).completed, "List checkbox can undo completion");
+            check(!store.load().get(0).completed, "Completed button can undo completion");
 
             JSONObject legacy = task.toJson();
             for (String key : new String[]{"followUpEnabled", "followUpMinutes", "completed", "ignored",
-                    "followUpAt", "occurrenceDate", "occurrenceId", "occurrenceStarted"}) legacy.remove(key);
+                    "followUpAt", "occurrenceDate", "occurrenceId", "occurrenceStarted", "history", "historyThrough"}) legacy.remove(key);
             Task migrated = Task.fromJson(legacy);
             check(!migrated.completed && !migrated.ignored && !migrated.followUpEnabled
                     && migrated.followUpMinutes == 60 && migrated.title.equals(task.title), "Old tasks migrate safely");
 
             // Both tasks due at once must post in a single wake-up, even with the activity closed.
             runOnMainSync(main::finish); waitForIdleSync();
+            task.schedule.kind = Schedule.Kind.EVERY_DAY;
+            task.occurrenceDate = LocalDate.now();
             task.nextDue = System.currentTimeMillis() - 1000;
             Task second = Task.fromJson(task.toJson()); second.id = store.nextId(tasks);
             second.title = "Second simultaneous task";
@@ -139,6 +155,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             first.actions[0].actionIntent.send();
             await(() -> store.load().get(0).completed, "Notification Completed action persisted");
             check(store.load().get(0).followUpAt == 0, "Notification completion cancels follow-ups");
+            Task persisted = Task.fromJson(store.load().get(0).toJson());
+            check(Boolean.TRUE.equals(persisted.history.get(persisted.occurrenceDate)), "Notification completion history survives JSON round trip");
             check(Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
                     "Completion dismisses notification");
             Notification other = Arrays.stream(notifications.getActiveNotifications()).findFirst().orElseThrow().getNotification();
@@ -153,6 +171,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             Task fresh = tasks.get(0);
             fresh.nextDue = System.currentTimeMillis() + 3000;
             fresh.occurrenceDate = null; fresh.occurrenceStarted = false; fresh.completed = false; fresh.followUpAt = 0;
+            fresh.history.clear();
             store.save(tasks);
             Reminders.reconcile(context, false);
             long timeout = System.currentTimeMillis() + 20000;
@@ -172,7 +191,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 waitForIdleSync();
                 check(findText(themed, "Monthly smoke test") != null, "Theme " + theme + " renders tasks");
-                check(findText(themed, "Completed") instanceof CheckBox, "Theme " + theme + " has completion control");
+                check(findText(themed, "Completed") instanceof Button, "Theme " + theme + " has completion control");
                 if (theme == 0) {
                     runOnMainSync(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
                     check(!store.load().get(0).ignored && store.load().get(0).followUpAt > 0, "Resume restores follow-ups");
@@ -180,12 +199,54 @@ public final class SmokeInstrumentation extends Instrumentation {
                 screenshot("smoke-theme-" + theme + ".png");
                 runOnMainSync(themed::finish); waitForIdleSync();
             }
+
+            // Exercise rollover and history through the real activity/store, without changing the device clock.
+            LocalDate today = LocalDate.now();
+            Task rollover = new Task(); rollover.id = store.nextId(store.load()); rollover.title = "Daily rollover test";
+            rollover.schedule.start = today.minusDays(2); rollover.hasReminder = false;
+            rollover.occurrenceDate = today.minusDays(1); rollover.occurrenceId = 7; rollover.completed = true;
+            rollover.historyThrough = today.minusDays(1);
+            rollover.nextDue = today.atTime(23, 59).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+            Task missed = Task.fromJson(rollover.toJson()); missed.id = store.nextId(List.of(rollover));
+            missed.title = "Missed history test"; missed.completed = false;
+            store.save(new ArrayList<>(List.of(rollover, missed)));
+            Activity history = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            waitForIdleSync();
+            check(store.load().stream().noneMatch(t -> t.completed), "Activity rolls yesterday's completion over before reminder time");
+            runOnMainSync(() -> findText(history, "Missed days").performClick()); waitForIdleSync();
+            check(findText(history, "Missed history test") != null, "Missed tab includes incomplete past date");
+            check(findText(history, "Daily rollover test") == null && findText(history, "Completed") == null,
+                    "Missed tab excludes completed days and current task controls");
+            screenshot("smoke-missed.png"); runOnMainSync(history::finish); waitForIdleSync();
+
+            Activity custom = startActivitySync(new Intent(context, CustomThemeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            waitForIdleSync();
+            int[] colours = {0xff101010, 0xff123456, 0xffab7612, 0xffefefef};
+            String[] labels = {"Background colour", "Button colour", "Highlight colour", "Text colour"};
+            runOnMainSync(() -> {
+                for (int i = 0; i < labels.length; i++) {
+                    final String label = labels[i];
+                    EditText field = (EditText) flatten(custom).stream().filter(v -> v instanceof EditText
+                            && label.contentEquals(v.getContentDescription())).findFirst().orElseThrow();
+                    field.setText(String.format(java.util.Locale.ROOT, "#%06X", colours[i] & 0xffffff));
+                }
+                findText(custom, "Save theme").performClick();
+            });
+            waitForIdleSync();
+            check(store.theme() == 3 && Arrays.equals(store.customColours(), colours), "All four custom colours persist");
+            Activity customMain = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            waitForIdleSync();
+            Palette applied = ((MainActivity) customMain).palette;
+            check(applied.background == colours[0] && applied.button == colours[1]
+                    && applied.highlight == colours[2] && applied.text == colours[3], "Custom colours apply after reopening");
+            screenshot("smoke-custom.png"); runOnMainSync(customMain::finish); waitForIdleSync();
             result.putString("stream", "PASS: " + checks + " Android smoke checks\n");
             resultCode = Activity.RESULT_OK;
         } catch (Throwable failure) {
             result.putString("stream", "FAIL: " + failure + "\n" + android.util.Log.getStackTraceString(failure));
         } finally {
             context.getSystemService(NotificationManager.class).cancelAll();
+            new TaskStore(context).customColours(originalCustom);
             preferences.edit().putString("tasks", originalTasks).putInt("theme", originalTheme)
                     .putInt("next_id", originalNext).commit();
             Reminders.reconcile(context, false);

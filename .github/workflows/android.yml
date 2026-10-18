@@ -9,8 +9,19 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+      - name: Read release version
+        id: version
+        shell: python
+        run: |
+          import os, pathlib, re
+          text = pathlib.Path('app/build.gradle').read_text()
+          version = re.search(r"versionName\s+['\"](\d+\.\d+\.\d+)['\"]", text).group(1)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'tag=V{version}\n')
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -20,13 +31,40 @@ jobs:
           packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v4
       - name: Install SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Test, lint, and build
-        run: ./gradlew recurrenceTest reminderStateTest lintDebug assembleDebug assembleRelease assembleAndroidTest --no-daemon
-      - uses: actions/upload-artifact@v4
+        run: ./gradlew recurrenceTest reminderStateTest colourTest lintDebug assembleDebug assembleRelease assembleAndroidTest --no-daemon
+      - name: Enable KVM for Android tests
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run native device tests
+        uses: reactivecircus/android-emulator-runner@v2
         with:
-          name: RepeatRemind-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation | tee smoke-results.txt
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-missed.png > smoke-missed.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-custom.png > smoke-custom.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-editor.png > smoke-editor.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-theme-0.png > smoke-theme-0.png
+            grep -q 'PASS:.*Android smoke checks' smoke-results.txt
+      - name: Save device test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-test-results
+          path: |
+            smoke-results.txt
+            smoke-*.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: RepeatRemind-release-unsigned
@@ -41,30 +79,36 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: RepeatRemind-debug-apk
-          path: dist/debug
-      - uses: actions/download-artifact@v4
-        with:
           name: RepeatRemind-release-unsigned
           path: dist/release
       - name: Publish APKs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: build-${{ github.run_number }}.${{ github.run_attempt }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
         run: |
-          cp dist/debug/app-debug.apk dist/RepeatRemind-debug.apk
           cp dist/release/app-release-unsigned.apk dist/RepeatRemind-release-unsigned.apk
           cat > release-notes.md <<'NOTES'
           Automatically built and checked by GitHub Actions.
 
-          Version 1.1.0 adds Completed checkboxes, notification actions, and optional repeat reminders until Completed or Ignore. Ignore silences a task's reminders until Resume is selected.
+          - Completion resets at the start of the next scheduled local date.
+          - Saved completion history and a Missed days tab.
+          - Completed buttons and single-line weekday highlights.
+          - Custom background, button, highlight, and text colours.
 
-          - **RepeatRemind-debug.apk**: installable debug build for Android 8.0+.
-          - **RepeatRemind-release-unsigned.apk**: optimized unsigned build; sign it before installing or distributing.
+          **RepeatRemind-release-unsigned.apk** is the optimized release build for Android 8.0+. Sign it with your own private key before installing. Debug builds remain local.
           NOTES
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            EXISTING_SHA=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
+            if [ "$EXISTING_SHA" != "$GITHUB_SHA" ]; then
+              echo 'This version is already released. Increase versionName and versionCode before publishing another commit.' >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" dist/RepeatRemind-release-unsigned.apk --clobber
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" \
-            dist/RepeatRemind-debug.apk dist/RepeatRemind-release-unsigned.apk \
+            dist/RepeatRemind-release-unsigned.apk \
             --target "$GITHUB_SHA" \
             --title "RepeatRemind $RELEASE_TAG" \
             --notes-file release-notes.md --latest

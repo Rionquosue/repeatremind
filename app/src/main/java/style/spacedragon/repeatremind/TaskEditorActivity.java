@@ -96,6 +96,8 @@ public final class TaskEditorActivity extends BaseActivity {
             Button toggle = button("", () -> { });
             toggle.setMinWidth(0); toggle.setMinimumWidth(0); toggle.setTextSize(11);
             toggle.setPadding(dp(4), 0, dp(4), 0);
+            toggle.setSingleLine(true); toggle.setGravity(Gravity.CENTER);
+            toggle.setIncludeFontPadding(false);
             final String name = ScheduleText.DAYS[i];
             updateDay(toggle, name, (s.weekdays & bit) != 0);
             toggle.setOnClickListener(v -> {
@@ -262,7 +264,7 @@ public final class TaskEditorActivity extends BaseActivity {
     }
 
     private void updateDay(Button toggle, String name, boolean selected) {
-        toggle.setText(selected ? name + "\n✓" : name);
+        toggle.setText(name);
         toggle.setSelected(selected);
         toggle.setTextColor(selected ? palette.highlightText : palette.text);
         toggle.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);

@@ -17,6 +17,8 @@ public final class ReminderStateTest {
         lateDeliveryAndOverlap();
         editsAndStaleActions();
         clockChangesAndMigration();
+        midnightAndHistory();
+        scheduleHistory();
         allSchedules();
         validation();
         System.out.println("PASS: " + assertions + " reminder state assertions");
@@ -57,7 +59,6 @@ public final class ReminderStateTest {
     private static void ignoreAndResume() {
         TaskState t = task(); update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-01T09:00:00Z");
         long token = t.occurrenceId;
-        t.setCompleted(token, true, at("2026-01-01T09:01:00Z"));
         check(t.ignoreOccurrence(token, at("2026-01-01T09:02:00Z")), "Ignore action accepted");
         check(t.ignored && !t.completed && t.followUpAt == 0, "Ignore silences without completing");
         check(t.nextAlarm() == Long.MAX_VALUE, "Ignored task needs no OS wake-up");
@@ -110,9 +111,10 @@ public final class ReminderStateTest {
         check(t.completed && t.occurrenceId == token, "Unrelated edits preserve completion");
         settings.schedule.hour = 10;
         t.configureFrom(settings, at("2026-01-01T09:13:00Z"), UTC);
-        check(!t.completed && t.occurrenceId != token, "Schedule edits create a new occurrence");
+        check(t.completed && t.occurrenceId != token, "Time edits preserve the day's completion and replace the token");
         check(!t.setCompleted(token, true, at("2026-01-01T09:14:00Z")), "Stale Complete rejected");
         equal(t.nextDue, "2026-01-01T10:00:00Z", "Edited reminder time");
+        t.setCompleted(t.occurrenceId, false, at("2026-01-01T09:15:00Z"));
         update(t, "2026-01-01T10:00:00Z");
         settings.followUpMinutes = 120;
         t.configureFrom(settings, at("2026-01-01T10:10:00Z"), UTC);
@@ -120,6 +122,95 @@ public final class ReminderStateTest {
         settings.followUpEnabled = false;
         t.configureFrom(settings, at("2026-01-01T10:11:00Z"), UTC);
         check(t.followUpAt == 0, "Disabling additional reminders clears wait");
+    }
+
+    private static void midnightAndHistory() {
+        TaskState t = task(); update(t, "2026-01-01T08:00:00Z");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-01T08:01:00Z"));
+        update(t, "2026-01-01T23:59:59Z");
+        check(t.completed, "Completion lasts through the local day");
+        long token = t.occurrenceId;
+        TaskState.Update midnight = update(t, "2026-01-02T00:00:00Z");
+        check(!t.completed && t.occurrenceDate.equals(LocalDate.of(2026, 1, 2)),
+                "Daily completion rolls over at midnight before reminder time");
+        check(midnight.clearNotification && !midnight.notify && t.followUpAt == 0,
+                "Midnight clears old state without delivering early");
+        check(Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Completed day is retained");
+        check(!t.setCompleted(token, true, at("2026-01-02T00:01:00Z")), "Yesterday's action rejected after midnight");
+        update(t, "2026-01-04T07:00:00Z");
+        check(!t.completed && !t.occurrenceStarted, "Opening before reminder after downtime resets state");
+        check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 2)))
+                && Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 3))), "Every missed day survives downtime");
+        check(!t.history.containsKey(LocalDate.of(2026, 1, 4)), "Today is not yet a missed day");
+        int count = t.history.size(); update(t, "2026-01-04T08:00:00Z");
+        check(t.history.size() == count, "History reconciliation is idempotent");
+        check(update(t, "2026-01-04T09:00:00Z").notify, "Today's reminder retains its time");
+
+        ZoneId local = ZoneId.of("America/New_York");
+        t = task(); t.update(at("2026-03-07T20:00:00Z"), local, false);
+        t.setCompleted(t.occurrenceId, true, at("2026-03-07T20:01:00Z"));
+        t.update(at("2026-03-08T04:59:59Z"), local, false);
+        check(t.completed, "UTC midnight does not reset a local day");
+        t.update(at("2026-03-08T05:00:00Z"), local, false);
+        check(!t.completed, "Local midnight reset before DST transition");
+        t.setCompleted(t.occurrenceId, true, at("2026-03-08T06:00:00Z"));
+        t.update(at("2026-03-09T04:00:00Z"), local, false);
+        check(!t.completed && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 3, 8))),
+                "History and rollover handle a 23-hour day");
+        long current = t.occurrenceId;
+        t.update(at("2026-03-08T22:00:00Z"), local, true);
+        check(t.occurrenceId == current, "Clock moving backward does not reopen old dates");
+        t.update(at("2026-03-09T05:00:00Z"), local, true);
+        check(t.occurrenceId == current, "Returning clock forward does not duplicate rollover");
+
+        t = task(); t.hasReminder = false; update(t, "2026-01-01T12:00:00Z");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-01T12:01:00Z"));
+        update(t, "2026-01-02T00:00:00Z");
+        check(!t.completed && t.nextAlarm() == Long.MAX_VALUE && t.history.size() == 1,
+                "No-reminder tasks roll over and track history without alarms");
+
+        // Migration preserves known outcomes, but cannot reconstruct data that was never recorded.
+        t = task(); t.occurrenceDate = LocalDate.of(2025, 12, 31); t.occurrenceId = 9; t.completed = true;
+        t.nextDue = at("2026-01-01T09:00:00Z").toEpochMilli();
+        update(t, "2026-01-04T08:00:00Z");
+        check(!t.completed && t.history.size() == 1 && Boolean.TRUE.equals(t.history.get(LocalDate.of(2025, 12, 31))),
+                "Migrating a stuck completion resets it without inventing missed history");
+    }
+
+    private static void scheduleHistory() {
+        TaskState t = task(); t.schedule.kind = Schedule.Kind.SELECTED_DAYS; t.schedule.weekdays = 31;
+        update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-05T00:00:00Z");
+        check(t.history.size() == 2 && !t.history.containsKey(LocalDate.of(2026, 1, 3)),
+                "Unselected weekend days are not missed");
+        t = task(); t.enabled = false;
+        update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-05T00:00:00Z");
+        check(t.history.isEmpty(), "Paused dates are excluded");
+        t.enabled = true; update(t, "2026-01-07T00:00:00Z");
+        check(t.history.size() == 2 && t.history.firstKey().equals(LocalDate.of(2026, 1, 5)), "Resume starts tracking again");
+        t = task(); t.ignored = true;
+        update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-03T00:00:00Z");
+        check(t.history.size() == 2 && t.history.values().stream().noneMatch(Boolean::booleanValue),
+                "Ignore silences reminders without falsely completing days");
+
+        t = task(); t.schedule.kind = Schedule.Kind.WEEKLY;
+        update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-02T00:00:00Z");
+        check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Incomplete weekly day is missed after that day ends");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-02T08:00:00Z"));
+        check(Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Late completion updates the active occurrence's history");
+        update(t, "2026-01-07T23:59:59Z"); check(t.completed, "Weekly completion remains until the next scheduled date");
+        update(t, "2026-01-08T00:00:00Z"); check(!t.completed, "Weekly completion resets at scheduled midnight");
+
+        for (Schedule.Kind kind : Schedule.Kind.values()) {
+            t = task(); t.schedule.kind = kind; t.schedule.day = 31; t.schedule.month = 12;
+            update(t, "2026-01-01T00:00:00Z"); update(t, "2029-01-01T00:00:00Z");
+            int expected = 0;
+            for (LocalDate day = LocalDate.of(2026, 1, 1); day.isBefore(LocalDate.of(2029, 1, 1)); day = day.plusDays(1)) {
+                if (Recurrence.matches(t.schedule, day)) {
+                    expected++; check(Boolean.FALSE.equals(t.history.get(day)), "Offline missed record for " + kind + " " + day);
+                }
+            }
+            check(t.history.size() == expected, "No extra dates for " + kind);
+        }
     }
 
     private static void clockChangesAndMigration() {

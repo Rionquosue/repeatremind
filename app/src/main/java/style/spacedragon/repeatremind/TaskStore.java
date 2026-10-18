@@ -49,4 +49,18 @@ final class TaskStore {
 
     int theme() { return preferences.getInt("theme", 0); }
     void theme(int theme) { preferences.edit().putInt("theme", theme).apply(); }
+
+    int[] customColours() {
+        int[] defaults = Palette.DEFAULT_CUSTOM;
+        return new int[]{preferences.getInt("custom_background", defaults[0]),
+                preferences.getInt("custom_button", defaults[1]),
+                preferences.getInt("custom_highlight", defaults[2]),
+                preferences.getInt("custom_text", defaults[3])};
+    }
+
+    void customColours(int[] colours) {
+        preferences.edit().putInt("custom_background", colours[0]).putInt("custom_button", colours[1])
+                .putInt("custom_highlight", colours[2]).putInt("custom_text", colours[3])
+                .putInt("theme", 3).apply();
+    }
 }

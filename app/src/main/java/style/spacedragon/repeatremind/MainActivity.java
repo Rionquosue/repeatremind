@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -24,19 +23,22 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
 
 public final class MainActivity extends BaseActivity {
     private int themeMode;
+    private int selectedTab;
     private boolean resumed;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = () -> {
@@ -54,6 +56,7 @@ public final class MainActivity extends BaseActivity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         themeMode = new TaskStore(this).theme();
+        if (state != null) selectedTab = state.getInt("tab", 0);
         openNotification(getIntent());
     }
 
@@ -71,7 +74,10 @@ public final class MainActivity extends BaseActivity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (themeMode != new TaskStore(this).theme()) { recreate(); return; }
+        TaskStore store = new TaskStore(this);
+        Palette current = new Palette(store.theme(), store.customColours());
+        if (themeMode != store.theme() || palette.background != current.background || palette.button != current.button
+                || palette.highlight != current.highlight || palette.text != current.text) { recreate(); return; }
         resumed = true;
         getSharedPreferences("repeatremind", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(taskChanges);
         refresh.run();
@@ -88,8 +94,22 @@ public final class MainActivity extends BaseActivity {
         List<Task> tasks = new TaskStore(this).load();
         LinearLayout root = column();
         root.addView(header("RepeatRemind", button("Theme", this::chooseTheme)));
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setPadding(dp(20), 0, dp(20), dp(8));
+        for (int i = 0; i < 2; i++) {
+            final int tab = i;
+            Button tabButton = button(i == 0 ? "Tasks" : "Missed days", () -> { selectedTab = tab; render(); });
+            boolean selected = selectedTab == i;
+            tabButton.setSelected(selected);
+            tabButton.setBackground(background(selected ? palette.highlight : palette.surface, 12, true));
+            tabButton.setTextColor(selected ? palette.highlightText : palette.text);
+            LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1);
+            if (i == 0) cell.setMarginEnd(dp(8));
+            tabs.addView(tabButton, cell);
+        }
+        root.addView(tabs);
         boolean reminders = tasks.stream().anyMatch(Task::remindersActive);
-        if (reminders && (!Reminders.allowed(this) || !Reminders.precise(this))) {
+        if (selectedTab == 0 && reminders && (!Reminders.allowed(this) || !Reminders.precise(this))) {
             LinearLayout notice = column();
             notice.setPadding(dp(24), dp(4), dp(24), dp(12));
             boolean notifications = !Reminders.allowed(this);
@@ -102,7 +122,9 @@ public final class MainActivity extends BaseActivity {
         }
         FrameLayout body = new FrameLayout(this);
         root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
-        if (tasks.isEmpty()) {
+        if (selectedTab == 1) {
+            renderMissed(body, tasks);
+        } else if (tasks.isEmpty()) {
             body.addView(new EmptyArrow(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             tasks.sort(Comparator.comparingLong(Task::nextAlarm));
@@ -116,6 +138,7 @@ public final class MainActivity extends BaseActivity {
                             .putExtra("task_id", tasks.get(position).id)));
             body.addView(list, new FrameLayout.LayoutParams(-1, -1));
         }
+        if (selectedTab == 0) {
         Button add = button(tasks.isEmpty() ? "+  Add repeating task" : "+",
                 () -> startActivity(new Intent(this, TaskEditorActivity.class)));
         add.setContentDescription("Add repeating task");
@@ -126,10 +149,13 @@ public final class MainActivity extends BaseActivity {
                 Gravity.BOTTOM | Gravity.END);
         floating.setMargins(dp(24), dp(24), dp(24), dp(24));
         body.addView(add, floating);
+        }
         install(root);
         // Refresh calendar state only while visible, including tasks with no notification.
         refreshHandler.removeCallbacks(refresh);
         long next = tasks.stream().mapToLong(t -> t.nextDue).filter(t -> t > 0).min().orElse(Long.MAX_VALUE);
+        if (!tasks.isEmpty()) next = Math.min(next, LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
+                .toInstant().toEpochMilli());
         if (resumed && next != Long.MAX_VALUE) {
             refreshHandler.postDelayed(refresh, Math.max(1000, next - System.currentTimeMillis() + 100));
         }
@@ -157,13 +183,9 @@ public final class MainActivity extends BaseActivity {
                 LinearLayout controls = new LinearLayout(MainActivity.this);
                 controls.setGravity(Gravity.CENTER_VERTICAL);
                 controls.setPadding(0, dp(8), 0, 0);
-                CheckBox complete = new CheckBox(MainActivity.this);
-                complete.setText(R.string.completed); complete.setTextColor(palette.text);
-                complete.setButtonTintList(new ColorStateList(
-                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
-                        new int[]{palette.highlight, palette.secondary}));
-                complete.setMinHeight(dp(48));
-                controls.addView(complete, new LinearLayout.LayoutParams(0, -2, 1));
+                Button complete = button(getString(R.string.completed), () -> { });
+                LinearLayout.LayoutParams space = new LinearLayout.LayoutParams(0, -2, 1);
+                space.setMarginEnd(dp(12)); controls.addView(complete, space);
                 controls.addView(button("", () -> { }));
                 card.addView(controls);
             } else card = (LinearLayout) recycled;
@@ -182,12 +204,14 @@ public final class MainActivity extends BaseActivity {
                             ? "EEE, MMM d · HH:mm" : "EEE, MMM d · h:mm a"));
             ((TextView) card.getChildAt(2)).setText(detail);
             LinearLayout controls = (LinearLayout) card.getChildAt(3);
-            CheckBox complete = (CheckBox) controls.getChildAt(0);
-            complete.setOnCheckedChangeListener(null);
-            complete.setChecked(task.completed);
-            complete.setContentDescription("Completed: " + task.title);
-            complete.setOnCheckedChangeListener((view, checked) -> {
-                try { Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId, checked); refresh.run(); }
+            Button complete = (Button) controls.getChildAt(0);
+            complete.setSelected(task.completed);
+            complete.setText(R.string.completed);
+            complete.setBackground(background(task.completed ? palette.highlight : palette.button, 14, false));
+            complete.setTextColor(task.completed ? palette.highlightText : palette.buttonText);
+            complete.setContentDescription((task.completed ? "Completed, tap to undo: " : "Mark completed: ") + task.title);
+            complete.setOnClickListener(view -> {
+                try { Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId, !task.completed); refresh.run(); }
                 catch (RuntimeException e) { error(e); }
             });
             Button ignore = (Button) controls.getChildAt(1);
@@ -204,12 +228,65 @@ public final class MainActivity extends BaseActivity {
         }
     }
 
+    private static final class MissedDay {
+        final Task task;
+        final LocalDate date;
+        MissedDay(Task task, LocalDate date) { this.task = task; this.date = date; }
+    }
+
+    private void renderMissed(FrameLayout body, List<Task> tasks) {
+        List<MissedDay> missed = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+        for (Task task : tasks) {
+            for (Map.Entry<LocalDate, Boolean> entry : task.history.headMap(today, false).entrySet()) {
+                if (!entry.getValue()) missed.add(new MissedDay(task, entry.getKey()));
+            }
+        }
+        missed.sort(Comparator.comparing((MissedDay day) -> day.date).reversed()
+                .thenComparing(day -> day.task.title));
+        if (missed.isEmpty()) {
+            TextView empty = text("No missed days", 17, palette.secondary);
+            empty.setGravity(Gravity.CENTER); body.addView(empty, new FrameLayout.LayoutParams(-1, -1));
+            return;
+        }
+        ListView list = new ListView(this);
+        list.setPadding(dp(20), dp(8), dp(20), dp(20)); list.setClipToPadding(false);
+        list.setDivider(new ColorDrawable(Color.TRANSPARENT)); list.setDividerHeight(dp(12));
+        list.setAdapter(new BaseAdapter() {
+            @Override public int getCount() { return missed.size(); }
+            @Override public Object getItem(int position) { return missed.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View recycled, ViewGroup parent) {
+                LinearLayout card;
+                if (recycled == null) {
+                    card = column(); card.setPadding(dp(18), dp(16), dp(18), dp(16));
+                    card.setBackground(background(palette.surface, 16, false));
+                    card.addView(text("", 18, palette.text));
+                    TextView date = text("", 14, palette.secondary); date.setPadding(0, dp(7), 0, 0); card.addView(date);
+                } else card = (LinearLayout) recycled;
+                MissedDay day = missed.get(position);
+                ((TextView) card.getChildAt(0)).setText(day.task.title);
+                ((TextView) card.getChildAt(1)).setText(day.date.format(DateTimeFormatter.ofPattern("EEE, MMM d, uuuu")));
+                return card;
+            }
+        });
+        list.setOnItemClickListener((parent, view, position, id) -> startActivity(
+                new Intent(this, TaskEditorActivity.class).putExtra("task_id", missed.get(position).task.id)));
+        body.addView(list, new FrameLayout.LayoutParams(-1, -1));
+    }
+
     private void chooseTheme() {
         new AlertDialog.Builder(this).setTitle("Colour theme")
-                .setSingleChoiceItems(new String[]{"Light", "Dark", "Colourblind (grayscale)"},
+                .setSingleChoiceItems(new String[]{"Light", "Dark", "Colourblind (grayscale)", "Custom"},
                         new TaskStore(this).theme(), (dialog, which) -> {
-                            new TaskStore(this).theme(which); dialog.dismiss(); recreate();
+                            dialog.dismiss();
+                            if (which == 3) startActivity(new Intent(this, CustomThemeActivity.class));
+                            else { new TaskStore(this).theme(which); recreate(); }
                         }).setNegativeButton("Cancel", null).show();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state); state.putInt("tab", selectedTab);
     }
 
     private void requestNotifications() {

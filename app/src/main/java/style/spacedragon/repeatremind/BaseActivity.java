@@ -19,11 +19,16 @@ abstract class BaseActivity extends Activity {
     Palette palette;
 
     @Override protected void onCreate(Bundle state) {
-        palette = new Palette(new TaskStore(this).theme());
+        TaskStore store = new TaskStore(this);
+        palette = new Palette(store.theme(), store.customColours());
         setTheme(palette.theme);
         super.onCreate(state);
         getWindow().setStatusBarColor(palette.background);
         getWindow().setNavigationBarColor(Build.VERSION.SDK_INT >= 27 ? palette.background : android.graphics.Color.BLACK);
+        if (store.theme() == 3) {
+            getWindow().getDecorView().setSystemUiVisibility(ColourMath.readableText(palette.background) == 0xff000000
+                    ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
+        }
     }
 
     int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }

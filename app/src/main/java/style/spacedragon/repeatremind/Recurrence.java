@@ -8,6 +8,21 @@ import java.time.temporal.ChronoUnit;
 final class Recurrence {
     private Recurrence() { }
 
+    static LocalDate previousDate(Schedule s, LocalDate date) {
+        for (int i = 0; i <= 366 && !date.isBefore(s.start); i++, date = date.minusDays(1)) {
+            if (matches(s, date)) return date;
+        }
+        return null;
+    }
+
+    static LocalDate nextDate(Schedule s, LocalDate date) {
+        if (date.isBefore(s.start)) date = s.start;
+        for (int i = 0; i <= 366; i++, date = date.plusDays(1)) {
+            if (matches(s, date)) return date;
+        }
+        throw new IllegalStateException("No recurrence within a year");
+    }
+
     static Instant previousOrAt(Schedule s, Instant at, ZoneId zone) {
         s.validate();
         LocalDate date = at.atZone(zone).toLocalDate();

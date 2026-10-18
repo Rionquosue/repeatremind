@@ -3,6 +3,8 @@ package style.spacedragon.repeatremind;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 /** Calendar occurrence and follow-up state; independent of Android for deterministic tests. */
 class TaskState {
@@ -19,6 +21,9 @@ class TaskState {
     LocalDate occurrenceDate;
     long occurrenceId;
     boolean occurrenceStarted;
+    // One small date/boolean entry per tracked scheduled day; today's outcome stays editable.
+    final NavigableMap<LocalDate, Boolean> history = new TreeMap<>();
+    LocalDate historyThrough;
 
     static final class Update {
         boolean changed;
@@ -43,15 +48,36 @@ class TaskState {
 
     void resetSchedule(Instant now, ZoneId zone) {
         nextDue = Recurrence.nextAfter(schedule, now, zone).toEpochMilli();
-        beginOccurrence(Instant.ofEpochMilli(nextDue).atZone(zone).toLocalDate());
+        LocalDate today = now.atZone(zone).toLocalDate();
+        beginOccurrence(Recurrence.nextDate(schedule, today));
+        if (historyThrough == null) historyThrough = today;
     }
 
     private void beginOccurrence(LocalDate date) {
         occurrenceDate = date;
         occurrenceId++;
         occurrenceStarted = false;
-        completed = false;
+        completed = history.getOrDefault(date, false);
         followUpAt = 0;
+    }
+
+    private boolean archiveBefore(LocalDate today) {
+        if (historyThrough == null) {
+            // Earlier releases did not track outcomes. Preserve known completion without inventing misses.
+            if (completed && occurrenceDate != null) history.put(occurrenceDate, true);
+            historyThrough = today;
+            return true;
+        }
+        if (!historyThrough.isBefore(today)) return false;
+        if (enabled) {
+            for (LocalDate date = historyThrough; date.isBefore(today); date = date.plusDays(1)) {
+                if (Recurrence.matches(schedule, date)) {
+                    history.putIfAbsent(date, date.equals(occurrenceDate) && completed);
+                }
+            }
+        }
+        historyThrough = today;
+        return true;
     }
 
     /** Consume at most one base reminder or one follow-up, even after a long offline period. */
@@ -59,12 +85,20 @@ class TaskState {
         validate();
         Update result = new Update();
         long millis = now.toEpochMilli();
+        LocalDate today = now.atZone(zone).toLocalDate();
         if (nextDue == 0) {
             resetSchedule(now, zone);
             result.changed = true;
         } else if (occurrenceDate == null) {
             // Backward-compatible migration from the original nextDue-only storage.
             beginOccurrence(Instant.ofEpochMilli(nextDue).atZone(zone).toLocalDate());
+            result.changed = true;
+        }
+        result.changed |= archiveBefore(today);
+        LocalDate currentDate = Recurrence.previousDate(schedule, today);
+        if (currentDate != null && currentDate.isAfter(occurrenceDate)) {
+            beginOccurrence(currentDate);
+            result.clearNotification = true;
             result.changed = true;
         }
         if (clockChanged) {
@@ -81,12 +115,9 @@ class TaskState {
             Instant latest = Recurrence.previousOrAt(schedule, now, zone);
             if (latest != null) due = Math.max(due, latest.toEpochMilli());
             LocalDate date = Instant.ofEpochMilli(due).atZone(zone).toLocalDate();
-            if (!date.equals(occurrenceDate)) {
-                beginOccurrence(date);
-                result.clearNotification = true;
-            }
-            boolean firstDelivery = !occurrenceStarted;
-            occurrenceStarted = true;
+            // A delayed alarm for yesterday cannot deliver against today's completion state.
+            boolean firstDelivery = date.equals(occurrenceDate) && !occurrenceStarted;
+            if (date.equals(occurrenceDate)) occurrenceStarted = true;
             nextDue = Recurrence.nextAfter(schedule, now, zone).toEpochMilli();
             if (firstDelivery && remindersActive() && !completed) {
                 result.notify = true;
@@ -107,6 +138,7 @@ class TaskState {
     boolean setCompleted(long expectedOccurrence, boolean value, Instant now) {
         if (expectedOccurrence != occurrenceId) return false;
         completed = value;
+        history.put(occurrenceDate, value);
         resetFollowUp(now);
         return true;
     }
@@ -119,7 +151,6 @@ class TaskState {
 
     void setIgnored(boolean value, Instant now) {
         ignored = value;
-        if (value) completed = false;
         resetFollowUp(now);
     }
 

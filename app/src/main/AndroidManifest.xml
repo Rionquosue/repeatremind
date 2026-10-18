@@ -14,6 +14,8 @@
         android:theme="@style/AppTheme.Light">
         <activity android:name=".TaskEditorActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".CustomThemeActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

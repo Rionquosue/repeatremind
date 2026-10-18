@@ -17,18 +17,27 @@ Android cloud backup and device transfer are disabled.
   for later months. February 29 yearly reminders use February 28 outside leap years.
 - Enable **Add reminder**, enter notification text, and select a local reminder time.
   Blank notification text defaults to the task name. Tasks can exist without a notification.
-- Check **Completed** in the list or expand a notification and tap **Completed**. This clears
-  the notification and stops follow-ups for that occurrence. Completion resets at the next
-  scheduled occurrence. Completing an upcoming occurrence early skips its reminder.
+- Tap **Completed** in the list or expanded notification. The list button highlights when
+  complete; tap it again to undo. Completion resets at local midnight when the next scheduled
+  date begins, independently of reminder time. Completing an upcoming occurrence early skips its reminder.
+- **Missed days** shows only past scheduled dates that remain incomplete, newest first.
+  Completion history is saved locally and catches up after the app has been closed. Today's
+  unfinished task is not yet missed. Unselected dates and paused days are excluded. Ignore only
+  silences notifications, so ignored days still count if incomplete. Completing an active weekly
+  or monthly occurrence late updates that occurrence's saved outcome. Deleting a task deletes its history.
+  Tracking starts when this version first opens each existing task; older releases did not
+  record historical outcomes, so earlier missed dates cannot be reconstructed.
 - Enable **Send additional reminders if not complete** and choose a wait in minutes, hours,
   or days (1 minute to 365 days). Each delivered reminder starts another wait. Regular calendar
   occurrences keep their original schedule; a new occurrence replaces an older unfinished one.
 - **Ignore** in the list or expanded notification silences all reminders for that task until
   **Resume** is selected, without marking it complete. The editor also has an Ignore checkbox.
-  Swiping away a notification or opening it does not stop follow-ups. Unchecking Completed
+  Swiping away a notification or opening it does not stop follow-ups. Undoing Completed
   resumes follow-ups for an occurrence that has already started, after the configured wait.
-- Tap a task to edit, pause, or delete it. **Theme** selects Light, Dark, or Colourblind.
-  Selected weekdays have checkmarks as well as highlighted backgrounds.
+- Tap a task to edit, pause, or delete it. **Theme** selects Light, Dark, Colourblind, or Custom.
+  Custom has native RGB pickers, hex fields, and a preview for background, button, highlight,
+  and text colours. Button and highlight labels automatically use contrasting black or white.
+  Selected weekdays remain on one line inside rounded highlights.
 - The start date is the earliest allowed occurrence. All dates use the phone's native local time.
 
 ## Permissions and delivery
@@ -63,31 +72,38 @@ Uninstalling or clearing app data removes all tasks. There is no external synchr
 
 ## Build
 
-Open in Android Studio, or use JDK 17 and the Android SDK:
+Open in Android Studio, or use the checked-in Gradle wrapper and Android SDK. The repository's
+AGP 9.4.1 / Gradle 9.6.0 configuration and JetBrains JDK 21 daemon criteria are preserved;
+Gradle can download the configured daemon JDK. App source/bytecode compatibility remains Java 17.
 
 ```sh
-sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-./gradlew recurrenceTest reminderStateTest lintDebug assembleDebug assembleRelease assembleAndroidTest
+sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+./gradlew recurrenceTest reminderStateTest colourTest lintDebug assembleDebug assembleRelease assembleAndroidTest
 ```
 
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installed directly.
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
 sign it with your own private key before distributing. Never commit signing keys.
-The GitHub Actions workflow builds both APKs on pushes to main and uploads them as artifacts.
-After checks pass, it also publishes both APKs on the repository's **Releases** page.
-Release tags use `build-<run number>.<attempt>` so retries get their own release.
+The GitHub Actions workflow tests both variants and publishes only the optimized unsigned APK
+on the repository's **Releases** page. Debug APKs are not uploaded or published.
+Release tags follow `versionName`, starting at **V0.1.1**. Increase `versionName` and `versionCode`
+for each new release; retries of the same commit can replace its asset. The internal versionCode
+continues increasing to permit upgrades despite restarting the displayed version number.
 Manual workflow runs on main also publish; pull requests only build and test.
-Download `RepeatRemind-debug.apk` for direct installation, or sign the optimized
-`RepeatRemind-release-unsigned.apk` with your own key. No signing keys are added to the repository.
+Sign `RepeatRemind-release-unsigned.apk` with your own key before installing.
+No signing keys are added to the repository.
 The build downloads tools only on the development machine; the installed app has no network access.
 
 `recurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
 covering selected days, leap years, short months, start dates, strict 14-day intervals and DST.
 `reminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
-stale notification actions, clock changes, and unchanged recurrence dates for every schedule.
+stale notification actions, local midnight/DST rollover, saved completion and missed history,
+clock changes, and unchanged recurrence dates for every schedule. `colourTest` checks hex input
+and readable label contrast over a grid of sRGB colours.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
-checkboxes, actual notification actions, permissions, and OS alarm delivery on a disposable device.
-CI compiles these device tests; running them requires an emulator or connected test device.
+buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
+permissions, and OS alarm delivery on a disposable device.
+CI runs these device tests on an Android 15 emulator before publishing the release.
 
 The calendar/hourglass launcher icon is a small native vector with an adaptive-icon wrapper.
