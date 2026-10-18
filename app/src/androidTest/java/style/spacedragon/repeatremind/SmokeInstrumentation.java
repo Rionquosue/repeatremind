@@ -79,14 +79,21 @@ public final class SmokeInstrumentation extends Instrumentation {
             });
             waitForIdleSync();
             await(() -> findText(editor, "MON") != null && findText(editor, "MON").getHeight() > 0, "Weekday layout ready");
+            int[] weekdayBounds = new int[2];
             ui(() -> {
                 Button monday = (Button) findText(editor, "MON");
-                int height = monday.getHeight();
-                int top = monday.getTop();
+                weekdayBounds[0] = monday.getHeight(); weekdayBounds[1] = monday.getTop();
                 monday.performClick();
+            });
+            await(() -> findText(editor, "MON").getLineCount() == 1, "Weekday layout after toggle");
+            ui(() -> findText(editor, "MON").performClick());
+            await(() -> findText(editor, "MON").getLineCount() == 1, "Highlighted weekday layout ready");
+            ui(() -> {
+                Button monday = (Button) findText(editor, "MON");
                 check("MON".contentEquals(monday.getText()) && monday.getLineCount() == 1,
                         "Selected weekday stays on a single line");
-                check(monday.getHeight() == height && monday.getTop() == top, "Selection does not move or clip the weekday");
+                check(monday.isSelected() && monday.getHeight() == weekdayBounds[0] && monday.getTop() == weekdayBounds[1],
+                        "Selection highlights without moving or clipping the weekday");
                 Spinner repeat = flatten(editor).stream().filter(v -> v instanceof Spinner)
                         .map(v -> (Spinner) v).filter(v -> v.getAdapter().getCount() == 6).findFirst().orElseThrow();
                 repeat.setSelection(4);
@@ -117,9 +124,11 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(task.nextDue > System.currentTimeMillis(), "Future alarm persisted");
             check(task.followUpEnabled && task.followUpMinutes == 120, "Follow-up interval persisted in minutes");
             check(findText(main, "+") != null, "Compact plus button after save");
+            await(() -> findText(main, "Completed") != null, "Task row layout ready");
             check(findText(main, "Completed") instanceof Button, "Native Completed button exists");
             ui(() -> findText(main, "Completed").performClick()); waitForIdleSync();
-            check(store.load().get(0).completed && findText(main, "Completed").isSelected(), "Completed button saves and highlights");
+            await(() -> store.load().get(0).completed && findText(main, "Completed") != null
+                    && findText(main, "Completed").isSelected(), "Completed button saves and highlights");
             ui(() -> findText(main, "Completed").performClick()); waitForIdleSync();
             check(!store.load().get(0).completed, "Completed button can undo completion");
 
@@ -191,7 +200,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                 Activity themed = startActivitySync(new Intent(context, MainActivity.class)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 waitForIdleSync();
-                check(findText(themed, "Monthly smoke test") != null, "Theme " + theme + " renders tasks");
+                await(() -> findText(themed, "Monthly smoke test") != null, "Theme " + theme + " renders tasks");
                 check(findText(themed, "Completed") instanceof Button, "Theme " + theme + " has completion control");
                 if (theme == 0) {
                     ui(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
@@ -215,7 +224,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             waitForIdleSync();
             check(store.load().stream().noneMatch(t -> t.completed), "Activity rolls yesterday's completion over before reminder time");
             ui(() -> findText(history, "Missed days").performClick()); waitForIdleSync();
-            check(findText(history, "Missed history test") != null, "Missed tab includes incomplete past date");
+            await(() -> findText(history, "Missed history test") != null, "Missed tab includes incomplete past date");
             check(findText(history, "Daily rollover test") == null && findText(history, "Completed") == null,
                     "Missed tab excludes completed days and current task controls");
             screenshot("smoke-missed.png"); ui(history::finish); waitForIdleSync();
