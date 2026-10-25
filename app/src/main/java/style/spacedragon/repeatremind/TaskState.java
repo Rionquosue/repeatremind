@@ -3,14 +3,21 @@ package style.spacedragon.repeatremind;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
 /** Calendar occurrence and follow-up state; independent of Android for deterministic tests. */
 class TaskState {
     static final int MAX_FOLLOW_UP_MINUTES = 525600;
+    static final int MAX_TEMPORARY_LENGTH = 999;
+    enum Span {
+        DAYS(ChronoUnit.DAYS), WEEKS(ChronoUnit.WEEKS), MONTHS(ChronoUnit.MONTHS), YEARS(ChronoUnit.YEARS);
+        final ChronoUnit unit;
+        Span(ChronoUnit unit) { this.unit = unit; }
+    }
     Schedule schedule = new Schedule();
-    boolean hasReminder;
+    boolean hasReminder = true;
     boolean enabled = true;
     boolean followUpEnabled;
     int followUpMinutes = 60;
@@ -24,6 +31,10 @@ class TaskState {
     // One small date/boolean entry per tracked scheduled day; today's outcome stays editable.
     final NavigableMap<LocalDate, Boolean> history = new TreeMap<>();
     LocalDate historyThrough;
+    // A temporary task runs for a set length from its start date, then disables itself.
+    boolean temporary;
+    int temporaryLength = 1;
+    Span temporarySpan = Span.MONTHS;
 
     static final class Update {
         boolean changed;
@@ -36,6 +47,18 @@ class TaskState {
         if (followUpEnabled && (followUpMinutes < 1 || followUpMinutes > MAX_FOLLOW_UP_MINUTES)) {
             throw new IllegalArgumentException("Reminder interval must be between 1 minute and 365 days");
         }
+        if (temporary && (temporarySpan == null || temporaryLength < 1 || temporaryLength > MAX_TEMPORARY_LENGTH)) {
+            throw new IllegalArgumentException("Temporary length must be between 1 and " + MAX_TEMPORARY_LENGTH);
+        }
+    }
+
+    /** First local date the task no longer runs, or null when it is not temporary. */
+    LocalDate endDate() {
+        return temporary ? schedule.start.plus(temporaryLength, temporarySpan.unit) : null;
+    }
+
+    boolean expired(LocalDate today) {
+        return temporary && !today.isBefore(endDate());
     }
 
     boolean remindersActive() { return hasReminder && enabled && !ignored; }
@@ -70,7 +93,9 @@ class TaskState {
         }
         if (!historyThrough.isBefore(today)) return false;
         if (enabled) {
-            for (LocalDate date = historyThrough; date.isBefore(today); date = date.plusDays(1)) {
+            LocalDate end = endDate();
+            LocalDate until = end != null && end.isBefore(today) ? end : today;
+            for (LocalDate date = historyThrough; date.isBefore(until); date = date.plusDays(1)) {
                 if (Recurrence.matches(schedule, date)) {
                     history.putIfAbsent(date, date.equals(occurrenceDate) && completed);
                 }
@@ -104,6 +129,12 @@ class TaskState {
             result.changed = true;
         }
         result.changed |= archiveBefore(today);
+        if (enabled && expired(today)) {
+            enabled = false;
+            followUpAt = 0;
+            result.clearNotification = true;
+            result.changed = true;
+        }
         LocalDate currentDate = Recurrence.previousDate(schedule, today);
         if (currentDate != null && currentDate.isAfter(occurrenceDate)) {
             beginOccurrence(currentDate);
@@ -180,6 +211,9 @@ class TaskState {
         enabled = settings.enabled;
         followUpEnabled = settings.followUpEnabled;
         followUpMinutes = settings.followUpMinutes;
+        temporary = settings.temporary;
+        temporaryLength = settings.temporaryLength;
+        temporarySpan = settings.temporarySpan;
         validate();
         if (scheduleChanged || nextDue == 0) resetSchedule(now, zone);
         else if (reminderChanged) resetFollowUp(now);

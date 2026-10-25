@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,6 +47,30 @@ final class TaskStore {
             throw new IllegalStateException("Task ID could not be saved");
         }
         return next;
+    }
+
+    /** The saved work schedule, or null before workdays are set up. */
+    Workdays workdays() {
+        String data = preferences.getString("work", null);
+        if (data == null) return null;
+        try {
+            Workdays work = WorkdaysJson.fromJson(new JSONObject(data));
+            work.validate();
+            return work;
+        } catch (JSONException | IllegalArgumentException e) {
+            throw new IllegalStateException("Stored workdays could not be read", e);
+        }
+    }
+
+    void workdays(Workdays work) {
+        try {
+            String data = work == null ? null : WorkdaysJson.toJson(work).toString();
+            if (!preferences.edit().putString("work", data).commit()) {
+                throw new IllegalStateException("Workdays could not be saved");
+            }
+        } catch (JSONException e) {
+            throw new IllegalStateException("Workdays could not be saved", e);
+        }
     }
 
     int theme() { return preferences.getInt("theme", 0); }

@@ -13,6 +13,7 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.NumberPicker;
 import android.widget.Spinner;
@@ -102,7 +103,9 @@ public final class SmokeInstrumentation extends Instrumentation {
             ui(() -> {
                 flatten(editor).stream().filter(v -> v instanceof NumberPicker)
                         .map(v -> (NumberPicker) v).findFirst().orElseThrow().setValue(31);
-                ((Switch) findText(editor, "Add reminder")).setChecked(true);
+                CheckBox reminder = (CheckBox) findText(editor, "Enable reminder");
+                check(reminder.isChecked(), "Reminder enabled by default");
+                reminder.setChecked(false); reminder.setChecked(true);
                 EditText notification = (EditText) flatten(editor).stream().filter(v -> v instanceof EditText
                         && "Defaults to task name".equals(String.valueOf(((EditText) v).getHint()))).findFirst().orElseThrow();
                 notification.setText("Custom notification text");

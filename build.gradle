@@ -8,8 +8,10 @@ tasks.register('compileRecurrenceTests', JavaCompile) {
             'app/src/main/java/style/spacedragon/repeatremind/TaskState.java',
             'app/src/main/java/style/spacedragon/repeatremind/ColourMath.java',
             'app/src/main/java/style/spacedragon/repeatremind/ScheduleText.java',
+            'app/src/main/java/style/spacedragon/repeatremind/Workdays.java',
+            'app/src/main/java/style/spacedragon/repeatremind/WorkText.java',
             'tests/RecurrenceTest.java', 'tests/ReminderStateTest.java', 'tests/ColourMathTest.java',
-            'tests/ScheduleTest.java')
+            'tests/ScheduleTest.java', 'tests/WorkdaysTest.java')
     classpath = files()
     sourceCompatibility = '17'
     targetCompatibility = '17'
@@ -17,7 +19,7 @@ tasks.register('compileRecurrenceTests', JavaCompile) {
     options.release = 17
 }
 [reminderStateTest: 'ReminderStateTest', recurrenceTest: 'RecurrenceTest', colourTest: 'ColourMathTest',
- scheduleTest: 'ScheduleTest'].each { name, test ->
+ scheduleTest: 'ScheduleTest', workdaysTest: 'WorkdaysTest'].each { name, test ->
     tasks.register(name, JavaExec) {
         dependsOn 'compileRecurrenceTests'
         classpath = files(layout.buildDirectory.dir('recurrence-tests'))
