@@ -89,28 +89,30 @@ final class Reminders {
         context.getSystemService(NotificationManager.class).cancel(id);
     }
 
-    static boolean setCompleted(Context context, int id, long occurrence, boolean value) {
+    // reconcile() clears the notification of any task that becomes completed or ignored.
+    static void setCompleted(Context context, int id, long occurrence, boolean value) {
         reconcile(context, false);
         TaskStore store = new TaskStore(context);
         List<Task> tasks = store.load();
         for (Task task : tasks) {
             if (task.id == id && task.setCompleted(occurrence, value, Instant.now())) {
-                store.save(tasks); clear(context, id); reconcile(context, false); return true;
+                store.save(tasks); reconcile(context, false); return;
             }
         }
-        return false;
     }
 
-    static boolean setIgnored(Context context, int id, long occurrence, boolean value) {
+    /** An occurrence of -1 applies to the task regardless of which occurrence is current. */
+    static void setIgnored(Context context, int id, long occurrence, boolean value) {
         reconcile(context, false);
         TaskStore store = new TaskStore(context);
         List<Task> tasks = store.load();
+        Instant now = Instant.now();
         for (Task task : tasks) {
-            if (task.id != id || (occurrence != -1 && task.occurrenceId != occurrence)) continue;
-            task.setIgnored(value, Instant.now());
-            store.save(tasks); clear(context, id); reconcile(context, false); return true;
+            if (task.id != id) continue;
+            if (occurrence == -1) task.setIgnored(value, now);
+            else if (!task.ignoreOccurrence(occurrence, now)) return;
+            store.save(tasks); reconcile(context, false); return;
         }
-        return false;
     }
 
     private static Notification.Action action(Context context, Task task, String action, int title, int icon) {

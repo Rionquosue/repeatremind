@@ -25,8 +25,8 @@ abstract class BaseActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(palette.background);
         getWindow().setNavigationBarColor(Build.VERSION.SDK_INT >= 27 ? palette.background : android.graphics.Color.BLACK);
-        if (store.theme() == 3) {
-            getWindow().getDecorView().setSystemUiVisibility(ColourMath.readableText(palette.background) == 0xff000000
+        if (palette.mode == 3) {
+            getWindow().getDecorView().setSystemUiVisibility(ColourMath.isLight(palette.background)
                     ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         }
     }
@@ -84,6 +84,18 @@ abstract class BaseActivity extends Activity {
         button.setPadding(dp(14), dp(8), dp(14), dp(8));
         button.setOnClickListener(v -> click.run());
         return button;
+    }
+
+    /** A rounded surface card; rows reuse it through ListView recycling. */
+    LinearLayout card(int vertical) {
+        LinearLayout card = column();
+        card.setPadding(dp(18), dp(vertical), dp(18), dp(vertical));
+        card.setBackground(background(palette.surface, 16, false));
+        return card;
+    }
+
+    String timePattern() {
+        return android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a";
     }
 
     LinearLayout header(String title, View trailing) {

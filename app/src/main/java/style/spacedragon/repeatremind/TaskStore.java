@@ -8,10 +8,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class TaskStore {
+    static final String PREFERENCES = "repeatremind";
     private final SharedPreferences preferences;
 
     TaskStore(Context context) {
-        preferences = context.getSharedPreferences("repeatremind", Context.MODE_PRIVATE);
+        preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
     }
 
     List<Task> load() {

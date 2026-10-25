@@ -78,7 +78,7 @@ Gradle can download the configured daemon JDK. App source/bytecode compatibility
 
 ```sh
 sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-./gradlew recurrenceTest reminderStateTest colourTest lintDebug assembleDebug assembleRelease assembleAndroidTest
+./gradlew recurrenceTest reminderStateTest colourTest scheduleTest lintDebug assembleDebug assembleRelease assembleAndroidTest
 ```
 
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
@@ -100,7 +100,8 @@ covering selected days, leap years, short months, start dates, strict 14-day int
 `reminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
 stale notification actions, local midnight/DST rollover, saved completion and missed history,
 clock changes, and unchanged recurrence dates for every schedule. `colourTest` checks hex input
-and readable label contrast over a grid of sRGB colours.
+and readable label contrast over a grid of sRGB colours. `scheduleTest` checks schedule copying,
+validation, list labels, and the date-level recurrence helpers.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
 buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.

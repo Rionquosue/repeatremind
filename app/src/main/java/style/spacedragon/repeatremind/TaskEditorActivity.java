@@ -3,7 +3,6 @@ package style.spacedragon.repeatremind;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
-import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.InputFilter;
@@ -301,8 +300,7 @@ public final class TaskEditorActivity extends BaseActivity {
     }
 
     private String formatTime() {
-        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(DateTimeFormatter.ofPattern(
-                android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a"));
+        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(DateTimeFormatter.ofPattern(timePattern()));
     }
 
     private void capture() {

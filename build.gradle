@@ -7,25 +7,20 @@ tasks.register('compileRecurrenceTests', JavaCompile) {
             'app/src/main/java/style/spacedragon/repeatremind/Recurrence.java',
             'app/src/main/java/style/spacedragon/repeatremind/TaskState.java',
             'app/src/main/java/style/spacedragon/repeatremind/ColourMath.java',
-            'tests/RecurrenceTest.java', 'tests/ReminderStateTest.java', 'tests/ColourMathTest.java')
+            'app/src/main/java/style/spacedragon/repeatremind/ScheduleText.java',
+            'tests/RecurrenceTest.java', 'tests/ReminderStateTest.java', 'tests/ColourMathTest.java',
+            'tests/ScheduleTest.java')
     classpath = files()
     sourceCompatibility = '17'
     targetCompatibility = '17'
     destinationDirectory = layout.buildDirectory.dir('recurrence-tests')
     options.release = 17
 }
-tasks.register('reminderStateTest', JavaExec) {
-    dependsOn 'compileRecurrenceTests'
-    classpath = files(layout.buildDirectory.dir('recurrence-tests'))
-    mainClass = 'style.spacedragon.repeatremind.ReminderStateTest'
-}
-tasks.register('recurrenceTest', JavaExec) {
-    dependsOn 'compileRecurrenceTests'
-    classpath = files(layout.buildDirectory.dir('recurrence-tests'))
-    mainClass = 'style.spacedragon.repeatremind.RecurrenceTest'
-}
-tasks.register('colourTest', JavaExec) {
-    dependsOn 'compileRecurrenceTests'
-    classpath = files(layout.buildDirectory.dir('recurrence-tests'))
-    mainClass = 'style.spacedragon.repeatremind.ColourMathTest'
+[reminderStateTest: 'ReminderStateTest', recurrenceTest: 'RecurrenceTest', colourTest: 'ColourMathTest',
+ scheduleTest: 'ScheduleTest'].each { name, test ->
+    tasks.register(name, JavaExec) {
+        dependsOn 'compileRecurrenceTests'
+        classpath = files(layout.buildDirectory.dir('recurrence-tests'))
+        mainClass = "style.spacedragon.repeatremind.$test"
+    }
 }
