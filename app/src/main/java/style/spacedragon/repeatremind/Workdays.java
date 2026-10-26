@@ -35,11 +35,6 @@ final class Workdays {
             return copy;
         }
 
-        boolean sameAs(Shift other) {
-            return other != null && start == other.start && end == other.end
-                    && breakStart == other.breakStart && breakEnd == other.breakEnd;
-        }
-
         void validate() {
             if (!minute(start) || !minute(end)) throw new IllegalArgumentException("Invalid shift time");
             if (start == end) throw new IllegalArgumentException("Shift start and end must differ");
@@ -143,8 +138,9 @@ final class Workdays {
         long millis = now.toEpochMilli();
         if (clockChanged && lastReminder > millis) { lastReminder = millis - 1; result.changed = true; }
         LocalDate today = now.atZone(zone).toLocalDate();
-        if (shifts.headMap(today.minusDays(KEEP_PAST_DAYS)).size() > 0) {
-            shifts.headMap(today.minusDays(KEEP_PAST_DAYS)).clear();
+        var expired = shifts.headMap(today.minusDays(KEEP_PAST_DAYS));
+        if (!expired.isEmpty()) {
+            expired.clear();
             result.changed = true;
         }
         if (!reminder) return result;
@@ -170,7 +166,7 @@ final class Workdays {
         copy.mode = mode; copy.weekdays = weekdays; copy.regular = regular.copy();
         for (var entry : shifts.entrySet()) copy.shifts.put(entry.getKey(), entry.getValue().copy());
         copy.reminder = reminder; copy.prepMinutes = prepMinutes; copy.commuteMinutes = commuteMinutes;
-        copy.reminderMinutes = reminderMinutes; copy.lastReminder = lastReminder;
+        copy.reminderMinutes = reminderMinutes;
         return copy;
     }
 }

@@ -30,9 +30,10 @@ public final class WorkdaysTest {
         night.breakStart = 2 * 60; night.breakEnd = 2 * 60 + 30;
         night.validate(); assertions++;
         Workdays.Shift copy = night.copy();
-        check(copy != night && copy.sameAs(night), "Shift copy");
+        check(copy != night && copy.start == night.start && copy.end == night.end
+                && copy.breakStart == night.breakStart && copy.breakEnd == night.breakEnd, "Shift copy");
         copy.breakEnd = 3 * 60;
-        check(!copy.sameAs(night), "Break change detected");
+        check(night.breakEnd == 2 * 60 + 30, "Shift copy is independent");
     }
 
     private static void validation() {
@@ -127,16 +128,18 @@ public final class WorkdaysTest {
         Workdays copy = work.copy();
         copy.shifts.get(LocalDate.of(2026, 1, 1)).start = 600;
         check(work.shifts.get(LocalDate.of(2026, 1, 1)).start == 540, "Copy is independent");
+        work.lastReminder = 123;
+        check(work.copy().lastReminder == 0, "Copy leaves delivery state with the stored schedule");
     }
 
     private static void labels() {
         Workdays.Shift shift = new Workdays.Shift(9 * 60, 17 * 60);
         same(WorkText.range(shift, H24), "09:00–17:00");
         same(WorkText.range(new Workdays.Shift(22 * 60, 6 * 60), H24), "22:00–06:00 next day");
-        same(WorkText.breakRange(shift, H24), "");
+        same(WorkText.hours(shift, H24), "09:00–17:00");
         shift.breakStart = 12 * 60; shift.breakEnd = 12 * 60 + 30;
-        same(WorkText.breakRange(shift, H24), "Break 12:00–12:30");
-        same(WorkText.days(31), "MON · TUE · WED · THU · FRI");
+        same(WorkText.hours(shift, H24), "09:00–17:00 · Break 12:00–12:30");
+        same(ScheduleText.weekdays(31), "MON · TUE · WED · THU · FRI");
         Workdays work = regular();
         same(WorkText.lead(work), "Prep 30 min · Commute 45 min · Reminder 15 min before prep");
         Workdays.Occurrence next = work.nextReminder(at("2026-01-02T06:00:00Z"), UTC);

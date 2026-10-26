@@ -65,9 +65,14 @@ buttons above the list. If precise access is declined, reminders still use appro
 Android may delay them. The app never requests network, contacts, location, shared storage,
 wake-lock, battery exemption, or foreground-service permissions.
 
-One AlarmManager alarm is scheduled for the earliest base reminder or follow-up. The receiver posts all due
-notifications and schedules the next occurrence, then exits. It does not poll or keep a process
-running. Reboot, clock/timezone changes, and app updates reschedule reminders. A late alarm
+At most two AlarmManager alarms are pending: an exact one for the earliest base or before-work
+reminder, and an inexact one for the earliest follow-up. Completed occurrences set no alarm, and
+follow-ups set none while notifications are blocked; unblocking them reschedules. The receiver posts
+all due notifications and schedules the next alarms, then exits. It does not poll or keep a process
+running. Reboot, clock/timezone changes, and app updates reschedule reminders. A task notification
+removes itself when the next occurrence begins, and its Completed action still records the day if
+tapped after that. Missed-day history is stored separately from task state and written only when
+it changes. A late alarm
 or reboot produces at most one catch-up notification per task, not a backlog. A skipped local
 DST time moves forward by the gap; a repeated hour generates one occurrence, using its first offset.
 Completion, Ignore, and pending follow-ups persist across process exits and reboot. Existing saved
@@ -88,7 +93,7 @@ Gradle can download the configured daemon JDK. App source/bytecode compatibility
 
 ```sh
 sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-./gradlew recurrenceTest reminderStateTest colourTest scheduleTest workdaysTest lintDebug assembleDebug assembleRelease assembleAndroidTest
+./gradlew jvmTests lintDebug assembleDebug assembleRelease assembleAndroidTest
 ```
 
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
@@ -100,15 +105,16 @@ It does not publish releases or upload APKs, since unsigned builds cannot be ins
 Increase `versionName` and `versionCode` for each release you sign and distribute.
 The build downloads tools only on the development machine; the installed app has no network access.
 
-`recurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
+`jvmTests` runs every plain-JDK test in `tests/`. `RecurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
 covering selected days, leap years, short months, start dates, strict 14-day intervals and DST.
-`reminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
+`ReminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
 stale notification actions, local midnight/DST rollover, saved completion and missed history,
-clock changes, and unchanged recurrence dates for every schedule. `colourTest` checks hex input
-and readable label contrast over a grid of sRGB colours. `scheduleTest` checks schedule copying,
-validation, list labels, and the date-level recurrence helpers. `workdaysTest` checks shift and
+clock changes, and unchanged recurrence dates for every schedule. `ColourMathTest` checks hex input
+and readable label contrast over a grid of sRGB colours. `ScheduleTest` checks schedule copying,
+validation, list labels, and the date-level recurrence helpers. `WorkdaysTest` checks shift and
 break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
-one delivery per shift, and workday labels. `reminderStateTest` also covers temporary tasks.
+one delivery per shift, and workday labels. `ReminderStateTest` also covers temporary tasks,
+wake-up selection, late completion, clock changes and compact history storage.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
 buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.

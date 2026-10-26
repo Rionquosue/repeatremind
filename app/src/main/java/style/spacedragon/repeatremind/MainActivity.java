@@ -35,20 +35,22 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public final class MainActivity extends BaseActivity {
     static final int WORK_TAB = 2;
     private static final String[] TABS = {"Tasks", "Missed days", "Workdays"};
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE, MMM d");
+    private static final DateTimeFormatter MISSED_DAY = DateTimeFormatter.ofPattern("EEE, MMM d, uuuu");
     private int selectedTab;
-    private boolean resumed;
+    private boolean resumed, writing, launching;
+    private Reminders.Data data;
+    private DateTimeFormatter time, dayTime;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
-    private final Runnable refresh = () -> {
-        if (!resumed) return;
-        try { Reminders.reconcile(this, false); render(); }
-        catch (RuntimeException e) { error(e); }
-    };
+    private final Runnable refresh = () -> { if (resumed) act(() -> Reminders.reconcile(this, false)); };
+    // Picks up writes from receivers while visible; this activity's own writes render directly.
     private final SharedPreferences.OnSharedPreferenceChangeListener taskChanges = (prefs, key) -> {
-        if (("tasks".equals(key) || "work".equals(key)) && resumed) {
+        if (("tasks".equals(key) || "work".equals(key)) && resumed && !writing) {
             refreshHandler.removeCallbacks(refresh);
             refreshHandler.post(refresh);
         }
@@ -57,7 +59,23 @@ public final class MainActivity extends BaseActivity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) selectedTab = state.getInt("tab", 0);
-        openNotification(getIntent());
+        // A restored or Recents launch carries the original intent again; it was already handled.
+        else if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) openNotification(getIntent());
+    }
+
+    /** Runs a store-writing action and renders its result, without the write triggering a second refresh. */
+    private void act(Supplier<Reminders.Data> action) {
+        writing = true;
+        try { data = action.get(); render(); }
+        catch (RuntimeException e) { error(e); }
+        finally { writing = false; }
+    }
+
+    /** Ignores repeat taps until this activity resumes, so a double tap opens one screen. */
+    private void launch(Intent intent) {
+        if (launching) return;
+        launching = true;
+        startActivity(intent);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -68,26 +86,23 @@ public final class MainActivity extends BaseActivity {
         if (intent.hasExtra("tab")) {
             selectedTab = intent.getIntExtra("tab", 0);
             intent.removeExtra("tab");
-            if (resumed) render();
-        }
-        int id = intent.getIntExtra("task_id", 0);
-        if (id != 0) {
-            intent.removeExtra("task_id");
-            edit(id);
+            if (resumed && data != null) render();
         }
     }
 
     private void edit(int id) {
-        startActivity(new Intent(this, TaskEditorActivity.class).putExtra("task_id", id));
+        launch(new Intent(this, TaskEditorActivity.class).putExtra("task_id", id));
     }
 
     @Override protected void onResume() {
         super.onResume();
         TaskStore store = new TaskStore(this);
-        Palette current = new Palette(store.theme(), store.customColours());
-        if (palette.mode != current.mode || palette.background != current.background || palette.button != current.button
-                || palette.highlight != current.highlight || palette.text != current.text) { recreate(); return; }
+        int mode = store.theme();
+        int[] custom = mode == 3 ? store.customColours() : null;
+        if (mode != palette.mode || (custom != null && (custom[0] != palette.background || custom[1] != palette.button
+                || custom[2] != palette.highlight || custom[3] != palette.text))) { recreate(); return; }
         resumed = true;
+        launching = false;
         getSharedPreferences(TaskStore.PREFERENCES, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(taskChanges);
         refresh.run();
     }
@@ -100,9 +115,10 @@ public final class MainActivity extends BaseActivity {
     }
 
     private void render() {
-        TaskStore store = new TaskStore(this);
-        List<Task> tasks = store.load();
-        Workdays work = store.workdays();
+        List<Task> tasks = new ArrayList<>(data.tasks);
+        Workdays work = data.work;
+        time = timeFormat();
+        dayTime = DateTimeFormatter.ofPattern("EEE, MMM d · " + timePattern());
         LinearLayout root = column();
         root.addView(header("RepeatRemind", button("Theme", this::chooseTheme)));
         LinearLayout tabs = new LinearLayout(this);
@@ -148,7 +164,7 @@ public final class MainActivity extends BaseActivity {
         }
         if (selectedTab == 0) {
         Button add = button(tasks.isEmpty() ? "+  Add repeating task" : "+",
-                () -> startActivity(new Intent(this, TaskEditorActivity.class)));
+                () -> launch(new Intent(this, TaskEditorActivity.class)));
         add.setContentDescription("Add repeating task");
         add.setTextSize(tasks.isEmpty() ? 15 : 32);
         add.setElevation(dp(3));
@@ -208,7 +224,7 @@ public final class MainActivity extends BaseActivity {
                     : !task.enabled ? (task.expired(LocalDate.now()) ? "Ended" : "Paused") : !task.hasReminder ? "No reminder"
                     : (followUp ? "Follow-up · " : "Next · ")
                     + Instant.ofEpochMilli(followUp ? task.followUpAt : task.nextDue).atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("EEE, MMM d · " + timePattern()));
+                    .format(dayTime);
             ((TextView) card.getChildAt(2)).setText(detail);
             LinearLayout controls = (LinearLayout) card.getChildAt(3);
             Button complete = (Button) controls.getChildAt(0);
@@ -217,16 +233,15 @@ public final class MainActivity extends BaseActivity {
             complete.setTextColor(task.completed ? palette.highlightText : palette.buttonText);
             complete.setContentDescription((task.completed ? "Completed, tap to undo: " : "Mark completed: ") + task.title);
             complete.setOnClickListener(view -> {
-                try { Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId, !task.completed); }
-                catch (RuntimeException e) { error(e); }
+                act(() -> Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId,
+                        task.occurrenceDate, !task.completed));
             });
             Button ignore = (Button) controls.getChildAt(1);
             ignore.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
             ignore.setText(task.ignored ? "Resume" : getString(R.string.ignore));
             ignore.setContentDescription((task.ignored ? "Resume reminders: " : "Ignore reminders: ") + task.title);
             ignore.setOnClickListener(view -> {
-                try { Reminders.setIgnored(MainActivity.this, task.id, -1, !task.ignored); }
-                catch (RuntimeException e) { error(e); }
+                act(() -> Reminders.setIgnored(MainActivity.this, task.id, -1, !task.ignored));
             });
             card.setOnClickListener(view -> edit(task.id));
             return card;
@@ -268,7 +283,7 @@ public final class MainActivity extends BaseActivity {
                 } else card = (LinearLayout) recycled;
                 MissedDay day = missed.get(position);
                 ((TextView) card.getChildAt(0)).setText(day.task.title);
-                ((TextView) card.getChildAt(1)).setText(day.date.format(DateTimeFormatter.ofPattern("EEE, MMM d, uuuu")));
+                ((TextView) card.getChildAt(1)).setText(day.date.format(MISSED_DAY));
                 return card;
             }
         });
@@ -289,21 +304,19 @@ public final class MainActivity extends BaseActivity {
             content.addView(button("Set up workdays", this::editWork));
             return;
         }
-        DateTimeFormatter time = timeFormat();
         ZoneId zone = ZoneId.systemDefault();
         LocalDate today = LocalDate.now();
         LinearLayout summary = card(18);
         TextView title = text(work.mode == Workdays.Mode.REGULAR ? "Regular schedule" : "Shift work", 19, palette.text);
         title.setTypeface(null, Typeface.BOLD); summary.addView(title);
         if (work.mode == Workdays.Mode.REGULAR) {
-            line(summary, WorkText.days(work.weekdays));
-            line(summary, WorkText.range(work.regular, time)
-                    + (work.regular.hasBreak() ? " · " + WorkText.breakRange(work.regular, time) : ""));
+            line(summary, ScheduleText.weekdays(work.weekdays));
+            line(summary, WorkText.hours(work.regular, time));
         }
         line(summary, WorkText.lead(work));
         Workdays.Occurrence next = work.reminder ? work.nextReminder(Instant.now(), zone) : null;
         line(summary, !work.reminder ? "Before-work reminder off" : next == null ? "No upcoming reminder"
-                : "Next reminder · " + next.remindAt.atZone(zone).format(DateTimeFormatter.ofPattern("EEE, MMM d · " + timePattern())));
+                : "Next reminder · " + next.remindAt.atZone(zone).format(dayTime));
         content.addView(summary, spaced());
         if (work.mode == Workdays.Mode.SHIFTS && work.shifts.subMap(today, today.plusDays(7)).isEmpty()) {
             TextView prompt = text("No shifts entered for the next 7 days. Add your times for each day you work.",
@@ -320,8 +333,8 @@ public final class MainActivity extends BaseActivity {
             if (shift == null) continue;
             any = true;
             LinearLayout day = card(14);
-            day.addView(text(date.format(DateTimeFormatter.ofPattern("EEE, MMM d")), 17, palette.text));
-            line(day, WorkText.range(shift, time) + (shift.hasBreak() ? " · " + WorkText.breakRange(shift, time) : ""));
+            day.addView(text(date.format(DAY), 17, palette.text));
+            line(day, WorkText.hours(shift, time));
             content.addView(day, spaced());
         }
         if (!any) content.addView(text("No work days", 15, palette.secondary), spaced());
@@ -340,7 +353,7 @@ public final class MainActivity extends BaseActivity {
     }
 
     private void editWork() {
-        startActivity(new Intent(this, WorkdaysActivity.class));
+        launch(new Intent(this, WorkdaysActivity.class));
     }
 
     private ListView cardList(FrameLayout body, int bottomPadding) {
@@ -355,9 +368,9 @@ public final class MainActivity extends BaseActivity {
     private void chooseTheme() {
         new AlertDialog.Builder(this).setTitle("Colour theme")
                 .setSingleChoiceItems(new String[]{"Light", "Dark", "Colourblind (grayscale)", "Custom"},
-                        new TaskStore(this).theme(), (dialog, which) -> {
+                        palette.mode, (dialog, which) -> {
                             dialog.dismiss();
-                            if (which == 3) startActivity(new Intent(this, CustomThemeActivity.class));
+                            if (which == 3) launch(new Intent(this, CustomThemeActivity.class));
                             else { new TaskStore(this).theme(which); recreate(); }
                         }).setNegativeButton("Cancel", null).show();
     }

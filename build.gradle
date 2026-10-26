@@ -9,20 +9,20 @@ tasks.register('compileRecurrenceTests', JavaCompile) {
             'app/src/main/java/style/spacedragon/repeatremind/ColourMath.java',
             'app/src/main/java/style/spacedragon/repeatremind/ScheduleText.java',
             'app/src/main/java/style/spacedragon/repeatremind/Workdays.java',
-            'app/src/main/java/style/spacedragon/repeatremind/WorkText.java',
-            'tests/RecurrenceTest.java', 'tests/ReminderStateTest.java', 'tests/ColourMathTest.java',
-            'tests/ScheduleTest.java', 'tests/WorkdaysTest.java')
+            'app/src/main/java/style/spacedragon/repeatremind/WorkText.java') + fileTree('tests').matching { include '*.java' }
     classpath = files()
     sourceCompatibility = '17'
     targetCompatibility = '17'
     destinationDirectory = layout.buildDirectory.dir('recurrence-tests')
     options.release = 17
 }
-[reminderStateTest: 'ReminderStateTest', recurrenceTest: 'RecurrenceTest', colourTest: 'ColourMathTest',
- scheduleTest: 'ScheduleTest', workdaysTest: 'WorkdaysTest'].each { name, test ->
-    tasks.register(name, JavaExec) {
+// Every tests/*.java class is a plain-JDK test with a main method; `jvmTests` runs them all.
+def jvmTestClasses = fileTree('tests').matching { include '*.java' }.files*.name.collect { it - '.java' }.sort()
+jvmTestClasses.each { test ->
+    tasks.register("run$test", JavaExec) {
         dependsOn 'compileRecurrenceTests'
         classpath = files(layout.buildDirectory.dir('recurrence-tests'))
         mainClass = "style.spacedragon.repeatremind.$test"
     }
 }
+tasks.register('jvmTests') { dependsOn jvmTestClasses.collect { "run$it" } }

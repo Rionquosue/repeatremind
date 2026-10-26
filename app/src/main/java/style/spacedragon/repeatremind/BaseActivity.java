@@ -2,14 +2,17 @@ package style.spacedragon.repeatremind;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -18,6 +21,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
 import android.widget.TextView;
 import java.time.format.DateTimeFormatter;
 import java.util.function.IntConsumer;
@@ -101,11 +105,50 @@ abstract class BaseActivity extends Activity {
         return card;
     }
 
-    String timePattern() {
-        return android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a";
+    static String timePattern(Context context) {
+        return android.text.format.DateFormat.is24HourFormat(context) ? "HH:mm" : "h:mm a";
     }
 
+    String timePattern() { return timePattern(this); }
+
     DateTimeFormatter timeFormat() { return DateTimeFormatter.ofPattern(timePattern()); }
+
+    RadioButton radio(CharSequence label) {
+        RadioButton radio = new RadioButton(this);
+        radio.setId(View.generateViewId()); radio.setText(label);
+        radio.setTextColor(palette.text); radio.setMinHeight(dp(48));
+        return radio;
+    }
+
+    void message(String text) {
+        new AlertDialog.Builder(this).setMessage(text).setPositiveButton("OK", null).show();
+    }
+
+    /** For a screen whose stored data could not be read: explain, then close. */
+    void failOpen(String text) {
+        new AlertDialog.Builder(this).setMessage(text)
+                .setPositiveButton("Close", (dialog, which) -> finish()).show();
+    }
+
+    void onTextChanged(EditText field, Runnable changed) {
+        field.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { changed.run(); }
+            @Override public void afterTextChanged(Editable e) { }
+        });
+    }
+
+    /** Bottom action row: an optional destructive button, then the primary one. */
+    LinearLayout actions(String destructive, Runnable onDestructive, String primary, Runnable onPrimary) {
+        LinearLayout actions = new LinearLayout(this);
+        actions.setPadding(dp(24), dp(12), dp(24), dp(16));
+        if (destructive != null) {
+            LinearLayout.LayoutParams space = new LinearLayout.LayoutParams(0, dp(52), 1);
+            space.setMarginEnd(dp(12)); actions.addView(button(destructive, onDestructive), space);
+        }
+        actions.addView(button(primary, onPrimary), new LinearLayout.LayoutParams(0, dp(52), 1));
+        return actions;
+    }
 
     /** A single-line row of weekday toggles; bits use Monday=1 through Sunday=64. */
     HorizontalScrollView weekdayToggles(int bits, IntConsumer changed) {

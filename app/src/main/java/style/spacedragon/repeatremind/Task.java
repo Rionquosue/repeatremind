@@ -4,26 +4,24 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import java.time.LocalDate;
 import java.util.Iterator;
-import java.util.Map;
 
 final class Task extends TaskState {
     int id;
     String title = "";
     String reminder = "";
+    /** History as last written by TaskStore; null forces the next save to write it. */
+    String savedHistory;
 
     JSONObject toJson() throws JSONException {
+        // History is stored separately by TaskStore, so frequent alarm updates do not rewrite it.
         Schedule s = schedule;
-        JSONObject outcomes = new JSONObject();
-        for (Map.Entry<LocalDate, Boolean> entry : history.entrySet()) {
-            outcomes.put(entry.getKey().toString(), entry.getValue());
-        }
         return new JSONObject().put("id", id).put("title", title).put("reminder", reminder)
                 .put("hasReminder", hasReminder).put("enabled", enabled).put("nextDue", nextDue)
                 .put("followUpEnabled", followUpEnabled).put("followUpMinutes", followUpMinutes)
                 .put("completed", completed).put("ignored", ignored).put("followUpAt", followUpAt)
                 .put("occurrenceDate", occurrenceDate == null ? "" : occurrenceDate.toString())
                 .put("occurrenceId", occurrenceId).put("occurrenceStarted", occurrenceStarted)
-                .put("history", outcomes).put("historyThrough", historyThrough == null ? "" : historyThrough.toString())
+                .put("historyThrough", historyThrough == null ? "" : historyThrough.toString())
                 .put("temporary", temporary).put("temporaryLength", temporaryLength)
                 .put("temporarySpan", temporarySpan.name())
                 .put("kind", s.kind.name()).put("start", s.start.toString())
@@ -57,6 +55,7 @@ final class Task extends TaskState {
         t.temporary = json.optBoolean("temporary", false);
         t.temporaryLength = json.optInt("temporaryLength", 1);
         t.temporarySpan = TaskState.Span.valueOf(json.optString("temporarySpan", TaskState.Span.MONTHS.name()));
+        // Releases before separate history storage kept it inside the task.
         JSONObject outcomes = json.optJSONObject("history");
         if (outcomes != null) {
             Iterator<String> keys = outcomes.keys();

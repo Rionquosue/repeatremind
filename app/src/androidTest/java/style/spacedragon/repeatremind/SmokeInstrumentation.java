@@ -19,7 +19,6 @@ import android.widget.NumberPicker;
 import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -170,8 +169,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             first.actions[0].actionIntent.send();
             await(() -> store.load().get(0).completed, "Notification Completed action persisted");
             check(store.load().get(0).followUpAt == 0, "Notification completion cancels follow-ups");
-            Task persisted = Task.fromJson(store.load().get(0).toJson());
-            check(Boolean.TRUE.equals(persisted.history.get(persisted.occurrenceDate)), "Notification completion history survives JSON round trip");
+            Task persisted = store.load().get(0);
+            check(Boolean.TRUE.equals(persisted.history.get(persisted.occurrenceDate)), "Notification completion history is stored");
             await(() -> Arrays.stream(notifications.getActiveNotifications()).noneMatch(n -> n.getId() == task.id),
                     "Completion dismisses notification");
             Notification other = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == second.id)

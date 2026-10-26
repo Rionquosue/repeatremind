@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 
+/** Callers validate schedules once, when they are loaded or edited. */
 final class Recurrence {
     private Recurrence() { }
 
@@ -24,7 +25,6 @@ final class Recurrence {
     }
 
     static Instant previousOrAt(Schedule s, Instant at, ZoneId zone) {
-        s.validate();
         LocalDate date = previousDate(s, at.atZone(zone).toLocalDate());
         // Today's occurrence may not have reached its time yet.
         if (date != null && at(s, date, zone).isAfter(at)) date = previousDate(s, date.minusDays(1));
@@ -33,7 +33,6 @@ final class Recurrence {
 
     /** Strictly after the instant supplied; always uses local calendar days, never 24h multiples. */
     static Instant nextAfter(Schedule s, Instant after, ZoneId zone) {
-        s.validate();
         // A valid schedule has at least one occurrence within 366 calendar days.
         LocalDate date = nextDate(s, after.atZone(zone).toLocalDate());
         if (!at(s, date, zone).isAfter(after)) date = nextDate(s, date.plusDays(1));

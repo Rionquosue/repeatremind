@@ -2,10 +2,8 @@ package style.spacedragon.repeatremind;
 
 import android.app.AlertDialog;
 import android.os.Bundle;
-import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.text.TextWatcher;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -22,11 +20,12 @@ public final class CustomThemeActivity extends BaseActivity {
     private final Button[] swatches = new Button[4];
     private LinearLayout preview;
     private TextView sample;
+    private int[] saved;
     private Button sampleButton, sampleHighlight;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        int[] saved = new TaskStore(this).customColours();
+        saved = new TaskStore(this).customColours();
         LinearLayout root = column();
         root.addView(header("Custom theme", button("Cancel", this::finish)));
         ScrollView scroll = new ScrollView(this);
@@ -47,11 +46,7 @@ public final class CustomThemeActivity extends BaseActivity {
             Button swatch = button("Pick", () -> pick(index)); swatches[i] = swatch;
             swatch.setContentDescription("Pick " + LABELS[i].toLowerCase(Locale.ROOT));
             row.addView(swatch, new LinearLayout.LayoutParams(dp(80), dp(52))); form.addView(row);
-            field.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-                @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updatePreview(); }
-                @Override public void afterTextChanged(Editable e) { }
-            });
+            onTextChanged(field, this::updatePreview);
         }
         form.addView(label("Preview"));
         preview = column(); preview.setPadding(dp(20), dp(20), dp(20), dp(20));
@@ -86,6 +81,7 @@ public final class CustomThemeActivity extends BaseActivity {
     }
 
     private void save() {
+        if (isFinishing()) return; // A second queued tap.
         int[] values = new int[4];
         for (int i = 0; i < 4; i++) {
             try { values[i] = ColourMath.parse(fields[i].getText().toString().trim()); }
@@ -97,7 +93,7 @@ public final class CustomThemeActivity extends BaseActivity {
     private void pick(int index) {
         int colour;
         try { colour = ColourMath.parse(fields[index].getText().toString().trim()); }
-        catch (IllegalArgumentException e) { colour = new TaskStore(this).customColours()[index]; }
+        catch (IllegalArgumentException e) { colour = saved[index]; }
         int[] rgb = {(colour >> 16) & 255, (colour >> 8) & 255, colour & 255};
         LinearLayout controls = column(); controls.setPadding(dp(24), dp(12), dp(24), dp(12));
         TextView value = text(hex(colour), 18, palette.text); value.setGravity(Gravity.CENTER);

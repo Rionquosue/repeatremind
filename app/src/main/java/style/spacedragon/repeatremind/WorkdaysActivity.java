@@ -3,9 +3,7 @@ package style.spacedragon.repeatremind;
 import android.app.AlertDialog;
 import android.app.TimePickerDialog;
 import android.os.Bundle;
-import android.text.Editable;
 import android.text.InputType;
-import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -34,6 +32,7 @@ public final class WorkdaysActivity extends BaseActivity {
     private EditText prep, commute, remind;
     private CheckBox reminderCheck;
     private TextView preview;
+    private DateTimeFormatter time;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -48,12 +47,12 @@ public final class WorkdaysActivity extends BaseActivity {
             }
             render();
         } catch (JSONException | RuntimeException e) {
-            new AlertDialog.Builder(this).setMessage("Workdays could not be opened.")
-                    .setPositiveButton("Close", (dialog, which) -> finish()).show();
+            failOpen("Workdays could not be opened.");
         }
     }
 
     private void render() {
+        time = timeFormat();
         LinearLayout root = column();
         root.addView(header("Workdays", button("Cancel", this::finish)));
         ScrollView scroll = new ScrollView(this);
@@ -104,34 +103,16 @@ public final class WorkdaysActivity extends BaseActivity {
         preview = text("", 13, palette.secondary);
         form.addView(preview);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setPadding(dp(24), dp(12), dp(24), dp(16));
-        if (existing) {
-            LinearLayout.LayoutParams space = new LinearLayout.LayoutParams(0, dp(52), 1);
-            space.setMarginEnd(dp(12)); actions.addView(button("Remove", this::confirmRemove), space);
-        }
-        actions.addView(button("Save workdays", this::save), new LinearLayout.LayoutParams(0, dp(52), 1));
-        root.addView(actions);
+        root.addView(actions(existing ? "Remove" : null, this::confirmRemove, "Save workdays", this::save));
         updateMode(); install(root);
         root.setFocusableInTouchMode(true); root.requestFocus();
-    }
-
-    private RadioButton radio(String label) {
-        RadioButton radio = new RadioButton(this);
-        radio.setId(View.generateViewId()); radio.setText(label);
-        radio.setTextColor(palette.text); radio.setMinHeight(dp(48));
-        return radio;
     }
 
     private EditText minutes(String name, int value) {
         EditText input = input("Minutes", String.valueOf(value), 3, false);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setContentDescription(name + " in minutes");
-        input.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updatePreview(); }
-            @Override public void afterTextChanged(Editable e) { }
-        });
+        onTextChanged(input, this::updatePreview);
         return input;
     }
 
@@ -177,10 +158,10 @@ public final class WorkdaysActivity extends BaseActivity {
 
     private Button timeButton(String name, IntSupplier get, IntConsumer set) {
         Button[] view = new Button[1];
-        view[0] = button(name + " · " + WorkText.time(get.getAsInt(), timeFormat()), () ->
+        view[0] = button(name + " · " + WorkText.time(get.getAsInt(), time), () ->
                 new TimePickerDialog(this, (picker, hour, minute) -> {
                     set.accept(hour * 60 + minute);
-                    view[0].setText(name + " · " + WorkText.time(get.getAsInt(), timeFormat()));
+                    view[0].setText(name + " · " + WorkText.time(get.getAsInt(), time));
                     updatePreview();
                 }, get.getAsInt() / 60, get.getAsInt() % 60,
                         android.text.format.DateFormat.is24HourFormat(this)).show());
@@ -198,7 +179,7 @@ public final class WorkdaysActivity extends BaseActivity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(6), 0, 0);
             row.addView(text(date.format(dateFormat), 16, palette.text), new LinearLayout.LayoutParams(0, -2, 1));
-            Button times = button(shift == null ? "Off" : WorkText.range(shift, timeFormat()), () -> editDay(date));
+            Button times = button(shift == null ? "Off" : WorkText.range(shift, time), () -> editDay(date));
             times.setBackground(background(shift == null ? palette.surface : palette.highlight, 12, true));
             times.setTextColor(shift == null ? palette.text : palette.highlightText);
             times.setContentDescription(date.format(dateFormat) + ", " + (shift == null ? "off" : times.getText()));
@@ -247,13 +228,13 @@ public final class WorkdaysActivity extends BaseActivity {
     private void updatePreview() {
         if (preview == null) return;
         int prepTime = minutes(prep), commuteTime = minutes(commute), remindTime = minutes(remind);
+        var upcoming = work.shifts.ceilingEntry(LocalDate.now());
         Workdays.Shift example = work.mode == Workdays.Mode.REGULAR ? work.regular
-                : work.shifts.isEmpty() ? null : work.shifts.ceilingEntry(LocalDate.now()) == null
-                ? work.shifts.lastEntry().getValue() : work.shifts.ceilingEntry(LocalDate.now()).getValue();
+                : upcoming != null ? upcoming.getValue() : work.shifts.isEmpty() ? null : work.shifts.lastEntry().getValue();
         if (example == null || prepTime < 0 || commuteTime < 0 || remindTime < 0) { preview.setText(""); return; }
         int leave = example.start - commuteTime;
         int ready = leave - prepTime;
-        DateTimeFormatter format = timeFormat();
+        DateTimeFormatter format = time;
         preview.setText("For a " + WorkText.time(example.start, format) + " start: reminder at "
                 + WorkText.time(Math.floorMod(ready - remindTime, 1440), format) + ", get ready at "
                 + WorkText.time(Math.floorMod(ready, 1440), format) + ", leave at "
@@ -262,15 +243,17 @@ public final class WorkdaysActivity extends BaseActivity {
     }
 
     private void save() {
+        if (isFinishing()) return; // A second queued tap.
         capture();
         try {
             work.validate();
-            TaskStore store = new TaskStore(this);
-            Workdays current = store.workdays();
-            // Keep delivery state from any reminder that fired while this screen was open.
-            work.lastReminder = current == null ? 0 : current.lastReminder;
-            store.workdays(work);
-            Reminders.clear(this, Reminders.WORK_NOTIFICATION); Reminders.reconcile(this, false); finish();
+            Reminders.update(this, false, (data, now) -> {
+                // Keep delivery state from any reminder that fired while this screen was open.
+                work.lastReminder = data.work == null ? 0 : data.work.lastReminder;
+                data.work = work; data.workChanged = true;
+                Reminders.clear(this, Reminders.WORK_NOTIFICATION);
+            });
+            finish();
         } catch (IllegalArgumentException e) {
             message(e.getMessage());
         } catch (RuntimeException e) { error(e); }
@@ -280,15 +263,15 @@ public final class WorkdaysActivity extends BaseActivity {
         new AlertDialog.Builder(this).setTitle("Remove workdays?")
                 .setMessage("Your schedule, shifts and before-work reminder will be deleted.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Remove", (dialog, which) -> {
+                    if (isFinishing()) return;
                     try {
-                        new TaskStore(this).workdays(null);
-                        Reminders.clear(this, Reminders.WORK_NOTIFICATION); Reminders.reconcile(this, false); finish();
+                        Reminders.update(this, false, (data, now) -> {
+                            data.work = null; data.workChanged = true;
+                            Reminders.clear(this, Reminders.WORK_NOTIFICATION);
+                        });
+                        finish();
                     } catch (RuntimeException e) { error(e); }
                 }).show();
-    }
-
-    private void message(String text) {
-        new AlertDialog.Builder(this).setMessage(text).setPositiveButton("OK", null).show();
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {

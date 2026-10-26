@@ -3,6 +3,7 @@ package style.spacedragon.repeatremind;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -23,14 +24,11 @@ import android.widget.Switch;
 import android.widget.TextView;
 import org.json.JSONException;
 import org.json.JSONObject;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.Month;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
-import java.util.List;
 import java.util.Locale;
 
 public final class TaskEditorActivity extends BaseActivity {
@@ -62,9 +60,14 @@ public final class TaskEditorActivity extends BaseActivity {
             originalIgnored = state == null ? task.ignored : state.getBoolean("originalIgnored", task.ignored);
             render();
         } catch (JSONException | RuntimeException e) {
-            new AlertDialog.Builder(this).setMessage("This task could not be opened.")
-                    .setPositiveButton("Close", (dialog, which) -> finish()).show();
+            failOpen("This task could not be opened.");
         }
+    }
+
+    /** Opened straight from a notification, the editor is the task root: return to the list, not out of the app. */
+    @Override public void finish() {
+        if (isTaskRoot() && !isFinishing()) startActivity(new Intent(this, MainActivity.class));
+        super.finish();
     }
 
     private void render() {
@@ -88,10 +91,8 @@ public final class TaskEditorActivity extends BaseActivity {
 
         biweekly = column();
         RadioGroup mode = new RadioGroup(this);
-        strict = new RadioButton(this); strict.setId(View.generateViewId());
-        strict.setText(R.string.strict_biweekly); strict.setTextColor(palette.text);
-        calendar = new RadioButton(this); calendar.setId(View.generateViewId());
-        calendar.setText(R.string.calendar_biweekly); calendar.setTextColor(palette.text);
+        strict = radio(getString(R.string.strict_biweekly));
+        calendar = radio(getString(R.string.calendar_biweekly));
         mode.addView(strict); mode.addView(calendar); biweekly.addView(mode);
         calendarDays = column();
         String[] names = {"1st", "15th", "Last day of month"};
@@ -185,9 +186,8 @@ public final class TaskEditorActivity extends BaseActivity {
         reminderFields.addView(followUpFields);
         followUpSwitch.setOnCheckedChangeListener((button, checked) ->
                 followUpFields.setVisibility(checked ? View.VISIBLE : View.GONE));
-        ignoredSwitch = new CheckBox(this);
-        ignoredSwitch.setText(R.string.ignore_reminders); ignoredSwitch.setTextColor(palette.text);
-        ignoredSwitch.setMinHeight(dp(64)); ignoredSwitch.setChecked(task.ignored);
+        ignoredSwitch = checkBox(R.string.ignore_reminders, task.ignored);
+        ignoredSwitch.setMinHeight(dp(64));
         reminderFields.addView(ignoredSwitch);
         form.addView(reminderFields);
         reminderFields.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
@@ -199,15 +199,7 @@ public final class TaskEditorActivity extends BaseActivity {
         enabledSwitch.setMinHeight(dp(56)); enabledSwitch.setChecked(task.enabled);
         if (task.id != 0) form.addView(enabledSwitch);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setPadding(dp(24), dp(12), dp(24), dp(16));
-        if (task.id != 0) {
-            Button delete = button("Delete", this::confirmDelete);
-            LinearLayout.LayoutParams space = new LinearLayout.LayoutParams(0, dp(52), 1);
-            space.setMarginEnd(dp(12)); actions.addView(delete, space);
-        }
-        actions.addView(button("Save task", this::save), new LinearLayout.LayoutParams(0, dp(52), 1));
-        root.addView(actions);
+        root.addView(actions(task.id != 0 ? "Delete" : null, this::confirmDelete, "Save task", this::save));
 
         repeat.setSelection(indexOf(s.kind));
         repeat.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -274,7 +266,7 @@ public final class TaskEditorActivity extends BaseActivity {
     }
 
     private String formatTime() {
-        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(DateTimeFormatter.ofPattern(timePattern()));
+        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(timeFormat());
     }
 
     private void capture() {
@@ -301,6 +293,8 @@ public final class TaskEditorActivity extends BaseActivity {
     }
 
     private void save() {
+        // A second tap queued before finish() takes effect must not save (or create) the task again.
+        if (isFinishing()) return;
         capture();
         if (task.title.isEmpty()) { title.setError("Enter a task name"); title.requestFocus(); return; }
         if (task.followUpEnabled && task.followUpMinutes == 0) {
@@ -319,38 +313,40 @@ public final class TaskEditorActivity extends BaseActivity {
                     .setPositiveButton("OK", null).show();
             return;
         }
+        if (task.hasReminder && task.reminder.isEmpty()) task.reminder = task.title;
         try {
-            task.validate();
-            if (task.hasReminder && task.reminder.isEmpty()) task.reminder = task.title;
-            Reminders.reconcile(this, false);
-            TaskStore store = new TaskStore(this);
-            List<Task> tasks = store.load();
-            Task current;
-            if (task.id == 0) {
-                current = new Task(); current.id = store.nextId(tasks); tasks.add(current);
-            } else {
-                current = tasks.stream().filter(t -> t.id == task.id).findFirst()
-                        .orElseThrow(() -> new IllegalStateException("This task was deleted while it was being edited"));
-            }
-            Instant now = Instant.now();
-            current.configureFrom(task, now, ZoneId.systemDefault());
-            current.title = task.title; current.reminder = task.reminder;
-            // Preserve a notification action received while this form was open.
-            if (task.ignored != originalIgnored) current.setIgnored(task.ignored, now);
-            store.save(tasks);
-            Reminders.clear(this, current.id); Reminders.reconcile(this, false); finish();
+            Reminders.update(this, false, (data, now) -> {
+                Task current;
+                if (task.id == 0) {
+                    current = new Task(); current.id = new TaskStore(this).nextId(data.tasks); data.tasks.add(current);
+                } else {
+                    current = data.task(task.id);
+                    if (current == null) throw new IllegalStateException("This task was deleted while it was being edited");
+                }
+                current.configureFrom(task, now, ZoneId.systemDefault()); // Validates the edit.
+                current.title = task.title; current.reminder = task.reminder;
+                // Preserve a notification action received while this form was open.
+                if (task.ignored != originalIgnored) current.setIgnored(task.ignored, now);
+                data.tasksChanged = true;
+                // A showing notification has the old text or settings; the next reminder posts a fresh one.
+                Reminders.clear(this, current.id);
+            });
+            finish();
         } catch (IllegalArgumentException e) {
-            new AlertDialog.Builder(this).setMessage(e.getMessage()).setPositiveButton("OK", null).show();
+            message(e.getMessage());
         } catch (RuntimeException e) { error(e); }
     }
 
     private void confirmDelete() {
         new AlertDialog.Builder(this).setTitle("Delete task?").setMessage(task.title)
                 .setNegativeButton("Cancel", null).setPositiveButton("Delete", (dialog, which) -> {
+                    if (isFinishing()) return;
                     try {
-                        TaskStore store = new TaskStore(this); List<Task> tasks = store.load();
-                        tasks.removeIf(t -> t.id == task.id); store.save(tasks);
-                        Reminders.clear(this, task.id); Reminders.reconcile(this, false); finish();
+                        Reminders.update(this, false, (data, now) -> {
+                            data.tasksChanged |= data.tasks.removeIf(t -> t.id == task.id);
+                            Reminders.clear(this, task.id);
+                        });
+                        finish();
                     } catch (RuntimeException e) { error(e); }
                 }).show();
     }

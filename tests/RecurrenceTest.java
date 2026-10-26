@@ -116,7 +116,7 @@ public final class RecurrenceTest {
         check(actual.equals(Instant.parse(expected)), expected + " != " + actual);
     }
     private static void expectInvalid(Schedule s) {
-        try { Recurrence.nextAfter(s, Instant.EPOCH, UTC); throw new AssertionError("Invalid schedule accepted"); }
+        try { s.validate(); throw new AssertionError("Invalid schedule accepted"); }
         catch (IllegalArgumentException expected) { assertions++; }
     }
     private static void check(boolean condition, String message) {

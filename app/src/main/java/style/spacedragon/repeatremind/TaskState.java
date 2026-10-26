@@ -28,7 +28,8 @@ class TaskState {
     LocalDate occurrenceDate;
     long occurrenceId;
     boolean occurrenceStarted;
-    // One small date/boolean entry per tracked scheduled day; today's outcome stays editable.
+    // Past scheduled days are kept only when missed (false); completion is kept only for the
+    // current or a future occurrence (true), so the map grows with missed days alone.
     final NavigableMap<LocalDate, Boolean> history = new TreeMap<>();
     LocalDate historyThrough;
     // A temporary task runs for a set length from its start date, then disables itself.
@@ -69,6 +70,22 @@ class TaskState {
                 ? Math.min(nextDue, followUpAt) : nextDue;
     }
 
+    /** The next base reminder worth waking for; a completed occurrence skips to the one after it. */
+    long nextReminder(ZoneId zone) {
+        if (!remindersActive()) return Long.MAX_VALUE;
+        if (completed && occurrenceDate != null
+                && !Instant.ofEpochMilli(nextDue).atZone(zone).toLocalDate().isAfter(occurrenceDate)) {
+            Instant dayEnd = occurrenceDate.plusDays(1).atStartOfDay(zone).toInstant().minusMillis(1);
+            return Recurrence.nextAfter(schedule, dayEnd, zone).toEpochMilli();
+        }
+        return nextDue;
+    }
+
+    /** The pending follow-up, which needs no exact alarm. */
+    long nextFollowUp() {
+        return remindersActive() && !completed && followUpEnabled && followUpAt > 0 ? followUpAt : Long.MAX_VALUE;
+    }
+
     void resetSchedule(Instant now, ZoneId zone) {
         nextDue = Recurrence.nextAfter(schedule, now, zone).toEpochMilli();
         LocalDate today = now.atZone(zone).toLocalDate();
@@ -86,8 +103,7 @@ class TaskState {
 
     private boolean archiveBefore(LocalDate today) {
         if (historyThrough == null) {
-            // Earlier releases did not track outcomes. Preserve known completion without inventing misses.
-            if (completed && occurrenceDate != null) history.put(occurrenceDate, true);
+            // Earlier releases did not track outcomes, so no missed days can be reconstructed.
             historyThrough = today;
             return true;
         }
@@ -96,18 +112,44 @@ class TaskState {
             LocalDate end = endDate();
             LocalDate until = end != null && end.isBefore(today) ? end : today;
             for (LocalDate date = historyThrough; date.isBefore(until); date = date.plusDays(1)) {
-                if (Recurrence.matches(schedule, date)) {
-                    history.putIfAbsent(date, date.equals(occurrenceDate) && completed);
+                if (Recurrence.matches(schedule, date) && !history.containsKey(date)
+                        && !(date.equals(occurrenceDate) && completed)) {
+                    history.put(date, false);
                 }
             }
         }
         historyThrough = today;
+        pruneCompleted();
         return true;
+    }
+
+    /** Completed past days are not missed, so they need no record. */
+    void pruneCompleted() {
+        if (historyThrough != null) history.headMap(historyThrough).values().removeIf(Boolean::booleanValue);
+    }
+
+    /** Compact storage form: comma-separated ISO dates, completed ones prefixed with '+'. */
+    String historyText() {
+        StringBuilder text = new StringBuilder();
+        for (var entry : history.entrySet()) {
+            if (text.length() > 0) text.append(',');
+            if (entry.getValue()) text.append('+');
+            text.append(entry.getKey());
+        }
+        return text.toString();
+    }
+
+    void readHistory(String text) {
+        history.clear();
+        if (text.isEmpty()) return;
+        for (String part : text.split(",")) {
+            boolean done = part.startsWith("+");
+            history.put(LocalDate.parse(done ? part.substring(1) : part), done);
+        }
     }
 
     /** Consume at most one base reminder or one follow-up, even after a long offline period. */
     Update update(Instant now, ZoneId zone, boolean clockChanged) {
-        validate();
         Update result = new Update();
         long millis = now.toEpochMilli();
         LocalDate today = now.atZone(zone).toLocalDate();
@@ -144,11 +186,12 @@ class TaskState {
         if (clockChanged) {
             Instant latest = Recurrence.previousOrAt(schedule, now, zone);
             LocalDate latestDate = latest == null ? null : latest.atZone(zone).toLocalDate();
-            nextDue = latest != null && (latestDate.isAfter(occurrenceDate)
+            long due = latest != null && (latestDate.isAfter(occurrenceDate)
                     || (latestDate.equals(occurrenceDate) && !occurrenceStarted))
                     ? latest.toEpochMilli() : Recurrence.nextAfter(schedule, now, zone).toEpochMilli();
-            if (followUpAt > 0) resetFollowUp(now);
-            result.changed = true;
+            if (due != nextDue) { nextDue = due; result.changed = true; }
+            // Only a clock moved backwards leaves a follow-up further away than its interval.
+            if (followUpAt > millis + followUpMinutes * 60000L) { resetFollowUp(now); result.changed = true; }
         }
         if (nextDue <= millis) {
             long due = nextDue;
@@ -178,10 +221,20 @@ class TaskState {
     boolean setCompleted(long expectedOccurrence, boolean value, Instant now) {
         if (expectedOccurrence != occurrenceId) return false;
         completed = value;
-        if (value || (historyThrough != null && occurrenceDate.isBefore(historyThrough))) {
-            history.put(occurrenceDate, value);
+        if (historyThrough != null && occurrenceDate.isBefore(historyThrough)) {
+            // A late weekly or monthly completion clears that day's missed record; undo restores it.
+            if (value) history.remove(occurrenceDate); else history.put(occurrenceDate, false);
+        } else if (value) {
+            history.put(occurrenceDate, true);
         } else history.remove(occurrenceDate); // An unfinished current/future date is not a missed record yet.
         resetFollowUp(now);
+        return true;
+    }
+
+    /** Completes a past day that has already been recorded as missed, e.g. from a notification after midnight. */
+    boolean completeMissed(LocalDate date) {
+        if (date == null || !Boolean.FALSE.equals(history.get(date))) return false;
+        history.remove(date);
         return true;
     }
 

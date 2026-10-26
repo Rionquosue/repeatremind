@@ -20,14 +20,10 @@ final class WorkText {
                 + (shift.end <= shift.start ? " next day" : "");
     }
 
-    static String breakRange(Workdays.Shift shift, DateTimeFormatter format) {
-        return shift.hasBreak() ? "Break " + time(shift.breakStart, format) + "–" + time(shift.breakEnd, format) : "";
-    }
-
-    static String days(int bits) {
-        List<String> labels = new ArrayList<>();
-        for (int i = 0; i < 7; i++) if ((bits & (1 << i)) != 0) labels.add(ScheduleText.DAYS[i]);
-        return String.join(" · ", labels);
+    /** Shift hours, with the break when there is one. */
+    static String hours(Workdays.Shift shift, DateTimeFormatter format) {
+        return range(shift, format) + (shift.hasBreak()
+                ? " · Break " + time(shift.breakStart, format) + "–" + time(shift.breakEnd, format) : "");
     }
 
     static String lead(Workdays work) {
@@ -40,8 +36,7 @@ final class WorkText {
         List<String> parts = new ArrayList<>();
         if (work.prepMinutes > 0) parts.add("Start getting ready at " + at(shift.prepAt, zone, format));
         if (work.commuteMinutes > 0) parts.add("Leave by " + at(shift.leaveAt, zone, format));
-        parts.add("Shift " + range(shift.shift, format));
-        if (shift.shift.hasBreak()) parts.add(breakRange(shift.shift, format));
+        parts.add("Shift " + hours(shift.shift, format));
         return String.join(" · ", parts);
     }
 

@@ -22,6 +22,7 @@ public final class ReminderStateTest {
         allSchedules();
         validation();
         temporaryTasks();
+        wakeupsAndStorage();
         System.out.println("PASS: " + assertions + " reminder state assertions");
     }
 
@@ -136,7 +137,7 @@ public final class ReminderStateTest {
                 "Daily completion rolls over at midnight before reminder time");
         check(midnight.clearNotification && !midnight.notify && t.followUpAt == 0,
                 "Midnight clears old state without delivering early");
-        check(Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Completed day is retained");
+        check(!t.history.containsKey(LocalDate.of(2026, 1, 1)), "A completed past day is not recorded as missed");
         check(!t.setCompleted(token, true, at("2026-01-02T00:01:00Z")), "Yesterday's action rejected after midnight");
         update(t, "2026-01-04T07:00:00Z");
         check(!t.completed && !t.occurrenceStarted, "Opening before reminder after downtime resets state");
@@ -156,7 +157,7 @@ public final class ReminderStateTest {
         check(!t.completed, "Local midnight reset before DST transition");
         t.setCompleted(t.occurrenceId, true, at("2026-03-08T06:00:00Z"));
         t.update(at("2026-03-09T04:00:00Z"), local, false);
-        check(!t.completed && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 3, 8))),
+        check(!t.completed && !t.history.containsKey(LocalDate.of(2026, 3, 8)),
                 "History and rollover handle a 23-hour day");
         long current = t.occurrenceId;
         t.update(at("2026-03-08T22:00:00Z"), local, true);
@@ -167,14 +168,14 @@ public final class ReminderStateTest {
         t = task(); t.hasReminder = false; update(t, "2026-01-01T12:00:00Z");
         t.setCompleted(t.occurrenceId, true, at("2026-01-01T12:01:00Z"));
         update(t, "2026-01-02T00:00:00Z");
-        check(!t.completed && t.nextAlarm() == Long.MAX_VALUE && t.history.size() == 1,
+        check(!t.completed && t.nextAlarm() == Long.MAX_VALUE && t.history.isEmpty(),
                 "No-reminder tasks roll over and track history without alarms");
 
         // Migration preserves known outcomes, but cannot reconstruct data that was never recorded.
         t = task(); t.occurrenceDate = LocalDate.of(2025, 12, 31); t.occurrenceId = 9; t.completed = true;
         t.nextDue = at("2026-01-01T09:00:00Z").toEpochMilli();
         update(t, "2026-01-04T08:00:00Z");
-        check(!t.completed && t.history.size() == 1 && Boolean.TRUE.equals(t.history.get(LocalDate.of(2025, 12, 31))),
+        check(!t.completed && t.history.isEmpty(),
                 "Migrating a stuck completion resets it without inventing missed history");
         t = task(); t.occurrenceDate = LocalDate.of(2026, 1, 2); t.occurrenceId = 3; t.completed = true;
         t.nextDue = at("2026-01-02T09:00:00Z").toEpochMilli();
@@ -182,7 +183,7 @@ public final class ReminderStateTest {
         check(t.completed && t.occurrenceDate.equals(LocalDate.of(2026, 1, 1)),
                 "Legacy task created after reminder time assigns completion to today");
         update(t, "2026-01-02T00:00:00Z");
-        check(!t.completed && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))),
+        check(!t.completed && !t.history.containsKey(LocalDate.of(2026, 1, 1)),
                 "Legacy next-reminder completion now rolls over at midnight");
     }
 
@@ -205,7 +206,7 @@ public final class ReminderStateTest {
         update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-02T00:00:00Z");
         check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Incomplete weekly day is missed after that day ends");
         t.setCompleted(t.occurrenceId, true, at("2026-01-02T08:00:00Z"));
-        check(Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Late completion updates the active occurrence's history");
+        check(!t.history.containsKey(LocalDate.of(2026, 1, 1)), "Late completion clears the active occurrence's missed record");
         t.setCompleted(t.occurrenceId, false, at("2026-01-02T08:01:00Z"));
         check(Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1))), "Undoing a past completion restores a missed record");
         t.setCompleted(t.occurrenceId, true, at("2026-01-02T08:02:00Z"));
@@ -322,6 +323,58 @@ public final class ReminderStateTest {
         stored.configureFrom(edited, at("2026-01-01T08:30:00Z"), UTC);
         check(stored.temporary && stored.temporaryLength == 3 && stored.temporarySpan == TaskState.Span.DAYS,
                 "Edits copy temporary settings");
+    }
+
+    private static void wakeupsAndStorage() {
+        // A completed occurrence wakes for the next one, not for its own reminder time.
+        TaskState t = task(); update(t, "2026-01-01T08:00:00Z");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-01T08:30:00Z"));
+        equal(t.nextAlarm(), "2026-01-01T09:00:00Z", "Stored due time is unchanged");
+        equal(t.nextReminder(UTC), "2026-01-02T09:00:00Z", "Completed early skips today's wake-up");
+        check(t.nextFollowUp() == Long.MAX_VALUE, "Completed task has no follow-up wake-up");
+        t.setCompleted(t.occurrenceId, false, at("2026-01-01T08:31:00Z"));
+        equal(t.nextReminder(UTC), "2026-01-01T09:00:00Z", "Undo restores today's wake-up");
+        update(t, "2026-01-01T09:00:00Z");
+        equal(t.nextFollowUp(), "2026-01-01T09:15:00Z", "Follow-up wake-up is separate");
+        equal(t.nextReminder(UTC), "2026-01-02T09:00:00Z", "Base wake-up moves to tomorrow");
+
+        // Weekly: completing late in the week skips only that occurrence.
+        t = task(); t.schedule.kind = Schedule.Kind.WEEKLY; t.followUpEnabled = false;
+        update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-01T09:00:00Z");
+        t.setCompleted(t.occurrenceId, true, at("2026-01-03T10:00:00Z"));
+        equal(t.nextReminder(UTC), "2026-01-08T09:00:00Z", "Weekly completion keeps the next week");
+
+        // A Complete that arrives after the occurrence rolled over clears that day's missed record.
+        t = task(); update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-01T09:00:00Z");
+        long token = t.occurrenceId; LocalDate day = t.occurrenceDate;
+        update(t, "2026-01-02T00:30:00Z");
+        check(Boolean.FALSE.equals(t.history.get(day)) && !t.setCompleted(token, true, at("2026-01-02T00:30:00Z")),
+                "Rolled over: the old token is stale and the day is missed");
+        check(t.completeMissed(day) && !t.history.containsKey(day), "Late Complete clears the missed day");
+        check(!t.completeMissed(day) && !t.completeMissed(null), "Only a recorded missed day can be completed late");
+        check(!t.completeMissed(LocalDate.of(2026, 1, 2)), "Today cannot be completed through the late path");
+
+        // Clock changes that move nothing do not rewrite storage.
+        t = task(); update(t, "2026-01-01T08:00:00Z");
+        check(!t.update(at("2026-01-01T08:05:00Z"), UTC, true).changed, "No-op clock change saves nothing");
+        update(t, "2026-01-01T09:00:00Z");
+        long followUp = t.followUpAt;
+        check(!t.update(at("2026-01-01T09:05:00Z"), UTC, true).changed && t.followUpAt == followUp,
+                "Clock change keeps a pending follow-up");
+        check(t.update(at("2026-01-01T08:00:00Z"), UTC, true).changed && t.followUpAt == at("2026-01-01T08:15:00Z").toEpochMilli(),
+                "Clock moved back restarts the follow-up interval");
+
+        // Compact history storage round-trips and drops completed past days.
+        t = task();
+        t.history.put(LocalDate.of(2026, 1, 1), false); t.history.put(LocalDate.of(2026, 1, 2), true);
+        t.history.put(LocalDate.of(2026, 1, 5), true);
+        check(t.historyText().equals("2026-01-01,+2026-01-02,+2026-01-05"), "Compact history text");
+        TaskState copy = task(); copy.readHistory(t.historyText());
+        check(copy.history.equals(t.history), "History text round-trips");
+        copy.readHistory(""); check(copy.history.isEmpty(), "Empty history text");
+        t.historyThrough = LocalDate.of(2026, 1, 4); t.pruneCompleted();
+        check(t.history.size() == 2 && Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1)))
+                && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 5))), "Prune keeps missed and upcoming days");
     }
 
     private static TaskState task() {
