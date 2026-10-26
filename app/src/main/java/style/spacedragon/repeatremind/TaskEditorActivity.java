@@ -3,10 +3,7 @@ package style.spacedragon.repeatremind;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
-import android.content.res.ColorStateList;
-import android.graphics.Typeface;
 import android.os.Bundle;
-import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -16,7 +13,6 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
 import android.widget.RadioButton;
@@ -39,13 +35,13 @@ import java.util.Locale;
 
 public final class TaskEditorActivity extends BaseActivity {
     private Task task;
-    private EditText title, reminderText, intervalInput;
-    private Switch reminderSwitch, enabledSwitch, followUpSwitch;
-    private CheckBox ignoredSwitch;
+    private EditText title, reminderText, intervalInput, temporaryLength;
+    private Switch enabledSwitch, followUpSwitch;
+    private CheckBox reminderCheck, ignoredSwitch, temporaryCheck;
     private boolean originalIgnored;
-    private Spinner repeat, month, intervalUnit;
+    private Spinner repeat, month, intervalUnit, temporarySpan;
     private NumberPicker day;
-    private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields, followUpFields;
+    private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields, followUpFields, temporaryFields;
     private RadioButton strict, calendar;
     private Button startDate, time;
     private final CheckBox[] markers = new CheckBox[3];
@@ -88,26 +84,7 @@ public final class TaskEditorActivity extends BaseActivity {
         repeat = spinner(REPEATS); form.addView(repeat);
 
         weekdays = column();
-        HorizontalScrollView dayScroll = new HorizontalScrollView(this);
-        LinearLayout dayRow = new LinearLayout(this);
-        dayRow.setPadding(0, dp(12), 0, dp(4));
-        for (int i = 0; i < 7; i++) {
-            final int bit = 1 << i;
-            Button toggle = button("", () -> { });
-            toggle.setMinWidth(0); toggle.setMinimumWidth(0); toggle.setTextSize(11);
-            toggle.setPadding(dp(4), 0, dp(4), 0);
-            toggle.setSingleLine(true); toggle.setGravity(Gravity.CENTER);
-            toggle.setIncludeFontPadding(false);
-            final String name = ScheduleText.DAYS[i];
-            updateDay(toggle, name, (s.weekdays & bit) != 0);
-            toggle.setOnClickListener(v -> {
-                s.weekdays ^= bit;
-                updateDay(toggle, name, (s.weekdays & bit) != 0);
-            });
-            LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(dp(48), dp(52));
-            cell.setMarginEnd(dp(4)); dayRow.addView(toggle, cell);
-        }
-        dayScroll.addView(dayRow); weekdays.addView(dayScroll); form.addView(weekdays);
+        weekdays.addView(weekdayToggles(s.weekdays, bits -> s.weekdays = bits)); form.addView(weekdays);
 
         biweekly = column();
         RadioGroup mode = new RadioGroup(this);
@@ -152,10 +129,28 @@ public final class TaskEditorActivity extends BaseActivity {
         });
         form.addView(startDate);
 
-        reminderSwitch = new Switch(this);
-        reminderSwitch.setText(R.string.add_reminder); reminderSwitch.setTextSize(17);
-        reminderSwitch.setTextColor(palette.text); reminderSwitch.setMinHeight(dp(64));
-        reminderSwitch.setChecked(task.hasReminder); form.addView(reminderSwitch);
+        temporaryCheck = checkBox(R.string.temporary_task, task.temporary); form.addView(temporaryCheck);
+        temporaryFields = column();
+        LinearLayout lengthRow = new LinearLayout(this);
+        lengthRow.setGravity(Gravity.CENTER_VERTICAL);
+        temporaryLength = input("Length", String.valueOf(task.temporaryLength), 3, false);
+        temporaryLength.setInputType(InputType.TYPE_CLASS_NUMBER);
+        temporaryLength.setContentDescription("Temporary task length");
+        lengthRow.addView(temporaryLength, new LinearLayout.LayoutParams(0, -2, 1));
+        temporarySpan = spinner(new String[]{"Days", "Weeks", "Months", "Years"});
+        temporarySpan.setSelection(task.temporarySpan.ordinal());
+        temporarySpan.setContentDescription("Temporary task length unit");
+        lengthRow.addView(temporarySpan, new LinearLayout.LayoutParams(0, -2, 1));
+        temporaryFields.addView(lengthRow);
+        temporaryFields.addView(text("Counted from the start date. The task disables itself when this period ends.",
+                13, palette.secondary));
+        temporaryFields.setVisibility(task.temporary ? View.VISIBLE : View.GONE);
+        form.addView(temporaryFields);
+        temporaryCheck.setOnCheckedChangeListener((button, checked) ->
+                temporaryFields.setVisibility(checked ? View.VISIBLE : View.GONE));
+
+        reminderCheck = checkBox(R.string.add_reminder, task.hasReminder);
+        reminderCheck.setTextSize(17); reminderCheck.setMinHeight(dp(64)); form.addView(reminderCheck);
         reminderFields = column();
         reminderFields.addView(label("Notification text"));
         reminderText = input("Defaults to task name", task.reminder, 1000, true);
@@ -196,7 +191,7 @@ public final class TaskEditorActivity extends BaseActivity {
         reminderFields.addView(ignoredSwitch);
         form.addView(reminderFields);
         reminderFields.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
-        reminderSwitch.setOnCheckedChangeListener((button, checked) ->
+        reminderCheck.setOnCheckedChangeListener((button, checked) ->
                 reminderFields.setVisibility(checked ? View.VISIBLE : View.GONE));
 
         enabledSwitch = new Switch(this);
@@ -231,19 +226,6 @@ public final class TaskEditorActivity extends BaseActivity {
         root.setFocusableInTouchMode(true); root.requestFocus();
     }
 
-    private EditText input(String hint, String value, int limit, boolean multiLine) {
-        EditText input = new EditText(this);
-        input.setHint(hint); input.setText(value); input.setTextColor(palette.text);
-        input.setHintTextColor(palette.secondary); input.setTextSize(17);
-        input.setMinHeight(dp(52)); input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(limit)});
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                | (multiLine ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
-        input.setSingleLine(!multiLine); input.setGravity(Gravity.TOP | Gravity.START);
-        input.setPadding(dp(12), dp(14), dp(12), dp(14));
-        input.setBackground(background(palette.surface, 12, true));
-        return input;
-    }
-
     private Spinner spinner(String[] values) {
         Spinner spinner = new Spinner(this);
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values) {
@@ -261,15 +243,6 @@ public final class TaskEditorActivity extends BaseActivity {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter); spinner.setMinimumHeight(dp(52));
         return spinner;
-    }
-
-    private void updateDay(Button toggle, String name, boolean selected) {
-        toggle.setText(name);
-        toggle.setSelected(selected);
-        toggle.setTextColor(selected ? palette.highlightText : palette.text);
-        toggle.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
-        toggle.setContentDescription(name + (selected ? ", selected" : ", not selected"));
-        toggle.setBackground(background(selected ? palette.highlight : palette.surface, 10, true));
     }
 
     private int indexOf(Schedule.Kind kind) {
@@ -301,14 +274,17 @@ public final class TaskEditorActivity extends BaseActivity {
     }
 
     private String formatTime() {
-        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(DateTimeFormatter.ofPattern(
-                android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a"));
+        return LocalTime.of(task.schedule.hour, task.schedule.minute).format(DateTimeFormatter.ofPattern(timePattern()));
     }
 
     private void capture() {
         task.title = title.getText().toString().trim();
         task.reminder = reminderText.getText().toString().trim();
-        task.hasReminder = reminderSwitch.isChecked(); task.enabled = enabledSwitch.isChecked();
+        task.hasReminder = reminderCheck.isChecked(); task.enabled = enabledSwitch.isChecked();
+        task.temporary = temporaryCheck.isChecked();
+        task.temporarySpan = TaskState.Span.values()[temporarySpan.getSelectedItemPosition()];
+        try { task.temporaryLength = Integer.parseInt(temporaryLength.getText().toString().trim()); }
+        catch (NumberFormatException e) { task.temporaryLength = 0; }
         task.followUpEnabled = followUpSwitch.isChecked();
         task.followUpMinutes = intervalMinutes(); task.ignored = ignoredSwitch.isChecked();
         task.schedule.day = day.getValue(); task.schedule.month = month.getSelectedItemPosition() + 1;
@@ -328,9 +304,20 @@ public final class TaskEditorActivity extends BaseActivity {
         capture();
         if (task.title.isEmpty()) { title.setError("Enter a task name"); title.requestFocus(); return; }
         if (task.followUpEnabled && task.followUpMinutes == 0) {
-            reminderSwitch.setChecked(true);
+            reminderCheck.setChecked(true);
             intervalInput.setError("Enter an interval from 1 minute to 365 days");
             intervalInput.requestFocus(); return;
+        }
+        if (task.temporary && (task.temporaryLength < 1 || task.temporaryLength > TaskState.MAX_TEMPORARY_LENGTH)) {
+            temporaryLength.setError("Enter a length from 1 to " + TaskState.MAX_TEMPORARY_LENGTH);
+            temporaryLength.requestFocus(); return;
+        }
+        if (task.enabled && task.expired(LocalDate.now())) {
+            new AlertDialog.Builder(this).setTitle("Temporary task has ended")
+                    .setMessage("Its last day was " + task.endDate().minusDays(1).format(ScheduleText.dateFormat())
+                            + ". Lengthen it, move the start date, or turn off Temporary task.")
+                    .setPositiveButton("OK", null).show();
+            return;
         }
         try {
             task.validate();

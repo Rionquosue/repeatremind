@@ -25,6 +25,8 @@ final class ColourMath {
         return (l + .05) / .05 >= 1.05 / (l + .05) ? 0xff000000 : 0xffffffff;
     }
 
+    static boolean isLight(int background) { return readableText(background) == 0xff000000; }
+
     static int blend(int a, int b, double fraction) {
         int r = (int) Math.round(((a >> 16) & 255) * (1 - fraction) + ((b >> 16) & 255) * fraction);
         int g = (int) Math.round(((a >> 8) & 255) * (1 - fraction) + ((b >> 8) & 255) * fraction);

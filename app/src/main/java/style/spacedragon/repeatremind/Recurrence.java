@@ -25,28 +25,24 @@ final class Recurrence {
 
     static Instant previousOrAt(Schedule s, Instant at, ZoneId zone) {
         s.validate();
-        LocalDate date = at.atZone(zone).toLocalDate();
-        for (int i = 0; i <= 366 && !date.isBefore(s.start); i++, date = date.minusDays(1)) {
-            if (!matches(s, date)) continue;
-            Instant candidate = date.atTime(s.hour, s.minute).atZone(zone).toInstant();
-            if (!candidate.isAfter(at)) return candidate;
-        }
-        return null;
+        LocalDate date = previousDate(s, at.atZone(zone).toLocalDate());
+        // Today's occurrence may not have reached its time yet.
+        if (date != null && at(s, date, zone).isAfter(at)) date = previousDate(s, date.minusDays(1));
+        return date == null ? null : at(s, date, zone);
     }
 
     /** Strictly after the instant supplied; always uses local calendar days, never 24h multiples. */
     static Instant nextAfter(Schedule s, Instant after, ZoneId zone) {
         s.validate();
-        LocalDate date = after.atZone(zone).toLocalDate();
-        if (date.isBefore(s.start)) date = s.start;
         // A valid schedule has at least one occurrence within 366 calendar days.
-        for (int i = 0; i <= 366; i++, date = date.plusDays(1)) {
-            if (!matches(s, date)) continue;
-            Instant candidate = date.atTime(s.hour, s.minute).atZone(zone).toInstant();
-            // atZone moves a DST gap forward and uses the first offset in a repeated hour.
-            if (candidate.isAfter(after)) return candidate;
-        }
-        throw new IllegalStateException("No recurrence within a year");
+        LocalDate date = nextDate(s, after.atZone(zone).toLocalDate());
+        if (!at(s, date, zone).isAfter(after)) date = nextDate(s, date.plusDays(1));
+        return at(s, date, zone);
+    }
+
+    /** atZone moves a DST gap forward and uses the first offset in a repeated hour. */
+    private static Instant at(Schedule s, LocalDate date, ZoneId zone) {
+        return date.atTime(s.hour, s.minute).atZone(zone).toInstant();
     }
 
     static boolean matches(Schedule s, LocalDate date) {

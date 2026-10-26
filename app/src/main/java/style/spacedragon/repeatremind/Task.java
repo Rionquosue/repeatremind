@@ -24,6 +24,8 @@ final class Task extends TaskState {
                 .put("occurrenceDate", occurrenceDate == null ? "" : occurrenceDate.toString())
                 .put("occurrenceId", occurrenceId).put("occurrenceStarted", occurrenceStarted)
                 .put("history", outcomes).put("historyThrough", historyThrough == null ? "" : historyThrough.toString())
+                .put("temporary", temporary).put("temporaryLength", temporaryLength)
+                .put("temporarySpan", temporarySpan.name())
                 .put("kind", s.kind.name()).put("start", s.start.toString())
                 .put("weekdays", s.weekdays).put("monthDays", s.monthDays)
                 .put("day", s.day).put("month", s.month).put("hour", s.hour).put("minute", s.minute);
@@ -52,6 +54,9 @@ final class Task extends TaskState {
         t.occurrenceDate = date.isEmpty() ? null : LocalDate.parse(date);
         String through = json.optString("historyThrough", "");
         t.historyThrough = through.isEmpty() ? null : LocalDate.parse(through);
+        t.temporary = json.optBoolean("temporary", false);
+        t.temporaryLength = json.optInt("temporaryLength", 1);
+        t.temporarySpan = TaskState.Span.valueOf(json.optString("temporarySpan", TaskState.Span.MONTHS.name()));
         JSONObject outcomes = json.optJSONObject("history");
         if (outcomes != null) {
             Iterator<String> keys = outcomes.keys();

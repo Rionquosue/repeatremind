@@ -15,7 +15,8 @@ Android cloud backup and device transfer are disabled.
   and **last day** of each month. These are independent monthly dates, not 14-day intervals.
 - Monthly dates clamp to the last day of short months without changing the requested day
   for later months. February 29 yearly reminders use February 28 outside leap years.
-- Enable **Add reminder**, enter notification text, and select a local reminder time.
+- **Enable reminder** is checked by default; enter notification text and select a local reminder time.
+  Unchecking it turns off all reminders for that task.
   Blank notification text defaults to the task name. Tasks can exist without a notification.
 - Tap **Completed** in the list or expanded notification. The list button highlights when
   complete; tap it again to undo. Completion resets at local midnight when the next scheduled
@@ -39,6 +40,15 @@ Android cloud backup and device transfer are disabled.
   and text colours. Button and highlight labels automatically use contrasting black or white.
   Selected weekdays remain on one line inside rounded highlights.
 - The start date is the earliest allowed occurrence. All dates use the phone's native local time.
+- **Temporary task** runs for a set number of days, weeks, months or years counted from the start
+  date, then disables itself. The list shows its last day and then **Ended**. Missed days stop at
+  the last day. To run it again, lengthen it or move the start date, then re-enable it.
+- The **Workdays** tab sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
+  select the days you work, or **shift work** (e.g. retail) and enter start and end times for each day;
+  days without times are off. The tab prompts you when no shifts are entered for the next 7 days.
+  Shifts can run past midnight and have an optional break inside the shift. Set **Prep time**,
+  **Commute time** and how many minutes before prep to be reminded: the reminder goes off at
+  shift start − commute − prep − reminder. It fires once per shift and is skipped once the shift starts.
 
 ## Permissions and delivery
 
@@ -78,7 +88,7 @@ Gradle can download the configured daemon JDK. App source/bytecode compatibility
 
 ```sh
 sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-./gradlew recurrenceTest reminderStateTest colourTest lintDebug assembleDebug assembleRelease assembleAndroidTest
+./gradlew recurrenceTest reminderStateTest colourTest scheduleTest workdaysTest lintDebug assembleDebug assembleRelease assembleAndroidTest
 ```
 
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
@@ -100,7 +110,10 @@ covering selected days, leap years, short months, start dates, strict 14-day int
 `reminderStateTest` checks completion, Ignore/Resume, interval validation, missed alarms,
 stale notification actions, local midnight/DST rollover, saved completion and missed history,
 clock changes, and unchanged recurrence dates for every schedule. `colourTest` checks hex input
-and readable label contrast over a grid of sRGB colours.
+and readable label contrast over a grid of sRGB colours. `scheduleTest` checks schedule copying,
+validation, list labels, and the date-level recurrence helpers. `workdaysTest` checks shift and
+break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
+one delivery per shift, and workday labels. `reminderStateTest` also covers temporary tasks.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
 buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.

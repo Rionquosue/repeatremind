@@ -2,7 +2,6 @@ package style.spacedragon.repeatremind;
 
 import android.Manifest;
 import android.app.AlertDialog;
-import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -26,6 +25,7 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -37,7 +37,8 @@ import java.util.ArrayList;
 import java.util.Map;
 
 public final class MainActivity extends BaseActivity {
-    private int themeMode;
+    static final int WORK_TAB = 2;
+    private static final String[] TABS = {"Tasks", "Missed days", "Workdays"};
     private int selectedTab;
     private boolean resumed;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
@@ -47,7 +48,7 @@ public final class MainActivity extends BaseActivity {
         catch (RuntimeException e) { error(e); }
     };
     private final SharedPreferences.OnSharedPreferenceChangeListener taskChanges = (prefs, key) -> {
-        if ("tasks".equals(key) && resumed) {
+        if (("tasks".equals(key) || "work".equals(key)) && resumed) {
             refreshHandler.removeCallbacks(refresh);
             refreshHandler.post(refresh);
         }
@@ -55,7 +56,6 @@ public final class MainActivity extends BaseActivity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        themeMode = new TaskStore(this).theme();
         if (state != null) selectedTab = state.getInt("tab", 0);
         openNotification(getIntent());
     }
@@ -65,54 +65,67 @@ public final class MainActivity extends BaseActivity {
     }
 
     private void openNotification(Intent intent) {
+        if (intent.hasExtra("tab")) {
+            selectedTab = intent.getIntExtra("tab", 0);
+            intent.removeExtra("tab");
+            if (resumed) render();
+        }
         int id = intent.getIntExtra("task_id", 0);
         if (id != 0) {
             intent.removeExtra("task_id");
-            startActivity(new Intent(this, TaskEditorActivity.class).putExtra("task_id", id));
+            edit(id);
         }
+    }
+
+    private void edit(int id) {
+        startActivity(new Intent(this, TaskEditorActivity.class).putExtra("task_id", id));
     }
 
     @Override protected void onResume() {
         super.onResume();
         TaskStore store = new TaskStore(this);
         Palette current = new Palette(store.theme(), store.customColours());
-        if (themeMode != store.theme() || palette.background != current.background || palette.button != current.button
+        if (palette.mode != current.mode || palette.background != current.background || palette.button != current.button
                 || palette.highlight != current.highlight || palette.text != current.text) { recreate(); return; }
         resumed = true;
-        getSharedPreferences("repeatremind", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(taskChanges);
+        getSharedPreferences(TaskStore.PREFERENCES, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(taskChanges);
         refresh.run();
     }
 
     @Override protected void onPause() {
         resumed = false;
         refreshHandler.removeCallbacks(refresh);
-        getSharedPreferences("repeatremind", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(taskChanges);
+        getSharedPreferences(TaskStore.PREFERENCES, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(taskChanges);
         super.onPause();
     }
 
     private void render() {
-        List<Task> tasks = new TaskStore(this).load();
+        TaskStore store = new TaskStore(this);
+        List<Task> tasks = store.load();
+        Workdays work = store.workdays();
         LinearLayout root = column();
         root.addView(header("RepeatRemind", button("Theme", this::chooseTheme)));
         LinearLayout tabs = new LinearLayout(this);
         tabs.setPadding(dp(20), 0, dp(20), dp(8));
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < TABS.length; i++) {
             final int tab = i;
-            Button tabButton = button(i == 0 ? "Tasks" : "Missed days", () -> { selectedTab = tab; render(); });
+            Button tabButton = button(TABS[i], () -> { selectedTab = tab; render(); });
+            tabButton.setPadding(dp(6), dp(8), dp(6), dp(8));
             boolean selected = selectedTab == i;
             tabButton.setSelected(selected);
             tabButton.setBackground(background(selected ? palette.highlight : palette.surface, 12, true));
             tabButton.setTextColor(selected ? palette.highlightText : palette.text);
             LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1);
-            if (i == 0) cell.setMarginEnd(dp(8));
+            if (i < TABS.length - 1) cell.setMarginEnd(dp(8));
             tabs.addView(tabButton, cell);
         }
         root.addView(tabs);
-        boolean reminders = tasks.stream().anyMatch(Task::remindersActive);
-        if (selectedTab == 0 && reminders && (!Reminders.allowed(this) || !Reminders.precise(this))) {
+        boolean reminders = selectedTab == 0 ? tasks.stream().anyMatch(Task::remindersActive)
+                : selectedTab == WORK_TAB && work != null && work.reminder;
+        boolean notifications = !Reminders.allowed(this);
+        if (reminders && (notifications || !Reminders.precise(this))) {
             LinearLayout notice = column();
             notice.setPadding(dp(24), dp(4), dp(24), dp(12));
-            boolean notifications = !Reminders.allowed(this);
             TextView message = text(notifications ? "Notifications are off."
                     : "Allow precise reminders to deliver at your chosen time.", 14, palette.secondary);
             message.setPadding(0, 0, 0, dp(8)); notice.addView(message);
@@ -124,19 +137,14 @@ public final class MainActivity extends BaseActivity {
         root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
         if (selectedTab == 1) {
             renderMissed(body, tasks);
+        } else if (selectedTab == WORK_TAB) {
+            renderWork(body, work);
         } else if (tasks.isEmpty()) {
             body.addView(new EmptyArrow(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             tasks.sort(Comparator.comparingLong(Task::nextAlarm));
-            ListView list = new ListView(this);
-            list.setClipToPadding(false);
-            list.setPadding(dp(20), dp(8), dp(20), dp(112));
-            list.setDivider(new ColorDrawable(Color.TRANSPARENT)); list.setDividerHeight(dp(12));
-            list.setAdapter(new TaskAdapter(tasks));
-            list.setOnItemClickListener((parent, view, position, id) ->
-                    startActivity(new Intent(this, TaskEditorActivity.class)
-                            .putExtra("task_id", tasks.get(position).id)));
-            body.addView(list, new FrameLayout.LayoutParams(-1, -1));
+            // Rows handle their own clicks, so the list needs no item listener.
+            cardList(body, 112).setAdapter(new TaskAdapter(tasks));
         }
         if (selectedTab == 0) {
         Button add = button(tasks.isEmpty() ? "+  Add repeating task" : "+",
@@ -154,7 +162,8 @@ public final class MainActivity extends BaseActivity {
         // Refresh calendar state only while visible, including tasks with no notification.
         refreshHandler.removeCallbacks(refresh);
         long next = tasks.stream().mapToLong(t -> t.nextDue).filter(t -> t > 0).min().orElse(Long.MAX_VALUE);
-        if (!tasks.isEmpty()) next = Math.min(next, LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
+        if (work != null) next = Math.min(next, work.nextAlarm(Instant.now(), ZoneId.systemDefault()));
+        if (!tasks.isEmpty() || work != null) next = Math.min(next, LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
                 .toInstant().toEpochMilli());
         if (resumed && next != Long.MAX_VALUE) {
             refreshHandler.postDelayed(refresh, Math.max(1000, next - System.currentTimeMillis() + 100));
@@ -172,8 +181,7 @@ public final class MainActivity extends BaseActivity {
         @Override public View getView(int position, View recycled, ViewGroup parent) {
             LinearLayout card;
             if (recycled == null) {
-                card = column(); card.setPadding(dp(18), dp(18), dp(18), dp(18));
-                card.setBackground(background(palette.surface, 16, false));
+                card = card(18);
                 TextView title = text("", 19, palette.text);
                 title.setTypeface(null, Typeface.BOLD); card.addView(title);
                 for (int i = 0; i < 2; i++) {
@@ -194,24 +202,22 @@ public final class MainActivity extends BaseActivity {
             title.setText(task.title);
             title.setPaintFlags(task.completed ? title.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG
                     : title.getPaintFlags() & ~Paint.STRIKE_THRU_TEXT_FLAG);
-            ((TextView) card.getChildAt(1)).setText(ScheduleText.describe(task.schedule));
+            ((TextView) card.getChildAt(1)).setText(ScheduleText.describe(task.schedule) + ScheduleText.until(task));
             boolean followUp = task.followUpAt > 0 && task.followUpAt < task.nextDue;
             String detail = task.ignored ? "Reminders ignored" : task.completed ? "Completed · " + task.occurrenceDate
-                    : !task.enabled ? "Paused" : !task.hasReminder ? "No reminder"
+                    : !task.enabled ? (task.expired(LocalDate.now()) ? "Ended" : "Paused") : !task.hasReminder ? "No reminder"
                     : (followUp ? "Follow-up · " : "Next · ")
                     + Instant.ofEpochMilli(followUp ? task.followUpAt : task.nextDue).atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern(android.text.format.DateFormat.is24HourFormat(MainActivity.this)
-                            ? "EEE, MMM d · HH:mm" : "EEE, MMM d · h:mm a"));
+                    .format(DateTimeFormatter.ofPattern("EEE, MMM d · " + timePattern()));
             ((TextView) card.getChildAt(2)).setText(detail);
             LinearLayout controls = (LinearLayout) card.getChildAt(3);
             Button complete = (Button) controls.getChildAt(0);
             complete.setSelected(task.completed);
-            complete.setText(R.string.completed);
             complete.setBackground(background(task.completed ? palette.highlight : palette.button, 14, false));
             complete.setTextColor(task.completed ? palette.highlightText : palette.buttonText);
             complete.setContentDescription((task.completed ? "Completed, tap to undo: " : "Mark completed: ") + task.title);
             complete.setOnClickListener(view -> {
-                try { Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId, !task.completed); refresh.run(); }
+                try { Reminders.setCompleted(MainActivity.this, task.id, task.occurrenceId, !task.completed); }
                 catch (RuntimeException e) { error(e); }
             });
             Button ignore = (Button) controls.getChildAt(1);
@@ -219,11 +225,10 @@ public final class MainActivity extends BaseActivity {
             ignore.setText(task.ignored ? "Resume" : getString(R.string.ignore));
             ignore.setContentDescription((task.ignored ? "Resume reminders: " : "Ignore reminders: ") + task.title);
             ignore.setOnClickListener(view -> {
-                try { Reminders.setIgnored(MainActivity.this, task.id, -1, !task.ignored); refresh.run(); }
+                try { Reminders.setIgnored(MainActivity.this, task.id, -1, !task.ignored); }
                 catch (RuntimeException e) { error(e); }
             });
-            card.setOnClickListener(view -> startActivity(new Intent(MainActivity.this, TaskEditorActivity.class)
-                    .putExtra("task_id", task.id)));
+            card.setOnClickListener(view -> edit(task.id));
             return card;
         }
     }
@@ -249,9 +254,7 @@ public final class MainActivity extends BaseActivity {
             empty.setGravity(Gravity.CENTER); body.addView(empty, new FrameLayout.LayoutParams(-1, -1));
             return;
         }
-        ListView list = new ListView(this);
-        list.setPadding(dp(20), dp(8), dp(20), dp(20)); list.setClipToPadding(false);
-        list.setDivider(new ColorDrawable(Color.TRANSPARENT)); list.setDividerHeight(dp(12));
+        ListView list = cardList(body, 20);
         list.setAdapter(new BaseAdapter() {
             @Override public int getCount() { return missed.size(); }
             @Override public Object getItem(int position) { return missed.get(position); }
@@ -259,8 +262,7 @@ public final class MainActivity extends BaseActivity {
             @Override public View getView(int position, View recycled, ViewGroup parent) {
                 LinearLayout card;
                 if (recycled == null) {
-                    card = column(); card.setPadding(dp(18), dp(16), dp(18), dp(16));
-                    card.setBackground(background(palette.surface, 16, false));
+                    card = card(16);
                     card.addView(text("", 18, palette.text));
                     TextView date = text("", 14, palette.secondary); date.setPadding(0, dp(7), 0, 0); card.addView(date);
                 } else card = (LinearLayout) recycled;
@@ -270,9 +272,84 @@ public final class MainActivity extends BaseActivity {
                 return card;
             }
         });
-        list.setOnItemClickListener((parent, view, position, id) -> startActivity(
-                new Intent(this, TaskEditorActivity.class).putExtra("task_id", missed.get(position).task.id)));
+        list.setOnItemClickListener((parent, view, position, id) -> edit(missed.get(position).task.id));
+    }
+
+    private void renderWork(FrameLayout body, Workdays work) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = column();
+        content.setPadding(dp(20), dp(8), dp(20), dp(24));
+        scroll.addView(content);
+        body.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        if (work == null) {
+            TextView intro = text("Set your working days or shifts, prep time and commute. A reminder goes off "
+                    + "before you need to start getting ready.", 15, palette.secondary);
+            intro.setPadding(dp(4), dp(8), dp(4), dp(16));
+            content.addView(intro);
+            content.addView(button("Set up workdays", this::editWork));
+            return;
+        }
+        DateTimeFormatter time = timeFormat();
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate today = LocalDate.now();
+        LinearLayout summary = card(18);
+        TextView title = text(work.mode == Workdays.Mode.REGULAR ? "Regular schedule" : "Shift work", 19, palette.text);
+        title.setTypeface(null, Typeface.BOLD); summary.addView(title);
+        if (work.mode == Workdays.Mode.REGULAR) {
+            line(summary, WorkText.days(work.weekdays));
+            line(summary, WorkText.range(work.regular, time)
+                    + (work.regular.hasBreak() ? " · " + WorkText.breakRange(work.regular, time) : ""));
+        }
+        line(summary, WorkText.lead(work));
+        Workdays.Occurrence next = work.reminder ? work.nextReminder(Instant.now(), zone) : null;
+        line(summary, !work.reminder ? "Before-work reminder off" : next == null ? "No upcoming reminder"
+                : "Next reminder · " + next.remindAt.atZone(zone).format(DateTimeFormatter.ofPattern("EEE, MMM d · " + timePattern())));
+        content.addView(summary, spaced());
+        if (work.mode == Workdays.Mode.SHIFTS && work.shifts.subMap(today, today.plusDays(7)).isEmpty()) {
+            TextView prompt = text("No shifts entered for the next 7 days. Add your times for each day you work.",
+                    15, palette.text);
+            prompt.setPadding(dp(4), 0, dp(4), dp(8));
+            content.addView(prompt);
+            content.addView(button("Enter shifts", this::editWork), spaced());
+        }
+        content.addView(label("Next 14 days"));
+        boolean any = false;
+        for (int i = 0; i < 14; i++) {
+            LocalDate date = today.plusDays(i);
+            Workdays.Shift shift = work.shiftOn(date);
+            if (shift == null) continue;
+            any = true;
+            LinearLayout day = card(14);
+            day.addView(text(date.format(DateTimeFormatter.ofPattern("EEE, MMM d")), 17, palette.text));
+            line(day, WorkText.range(shift, time) + (shift.hasBreak() ? " · " + WorkText.breakRange(shift, time) : ""));
+            content.addView(day, spaced());
+        }
+        if (!any) content.addView(text("No work days", 15, palette.secondary), spaced());
+        content.addView(button("Edit workdays", this::editWork));
+    }
+
+    private void line(LinearLayout card, String value) {
+        TextView line = text(value, 14, palette.secondary);
+        line.setPadding(0, dp(7), 0, 0); card.addView(line);
+    }
+
+    private LinearLayout.LayoutParams spaced() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(12);
+        return params;
+    }
+
+    private void editWork() {
+        startActivity(new Intent(this, WorkdaysActivity.class));
+    }
+
+    private ListView cardList(FrameLayout body, int bottomPadding) {
+        ListView list = new ListView(this);
+        list.setClipToPadding(false);
+        list.setPadding(dp(20), dp(8), dp(20), dp(bottomPadding));
+        list.setDivider(new ColorDrawable(Color.TRANSPARENT)); list.setDividerHeight(dp(12));
         body.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        return list;
     }
 
     private void chooseTheme() {
@@ -307,12 +384,6 @@ public final class MainActivity extends BaseActivity {
             startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                     Uri.parse("package:" + getPackageName())));
         }
-    }
-
-    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(requestCode, permissions, results);
-        try { Reminders.reconcile(this, false); render(); }
-        catch (RuntimeException e) { error(e); }
     }
 
     private final class EmptyArrow extends View {

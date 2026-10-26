@@ -86,11 +86,12 @@ public final class CustomThemeActivity extends BaseActivity {
     }
 
     private void save() {
-        for (EditText field : fields) {
-            try { ColourMath.parse(field.getText().toString().trim()); }
-            catch (IllegalArgumentException e) { field.setError(e.getMessage()); field.requestFocus(); return; }
+        int[] values = new int[4];
+        for (int i = 0; i < 4; i++) {
+            try { values[i] = ColourMath.parse(fields[i].getText().toString().trim()); }
+            catch (IllegalArgumentException e) { fields[i].setError(e.getMessage()); fields[i].requestFocus(); return; }
         }
-        new TaskStore(this).customColours(colours()); finish();
+        new TaskStore(this).customColours(values); finish();
     }
 
     private void pick(int index) {
@@ -111,7 +112,7 @@ public final class CustomThemeActivity extends BaseActivity {
             slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar bar, int progress, boolean user) {
                     rgb[channel] = progress;
-                    int selected = 0xff000000 | rgb[0] << 16 | rgb[1] << 8 | rgb[2];
+                    int selected = rgb(rgb);
                     value.setText(hex(selected)); value.setBackgroundColor(selected);
                     value.setTextColor(ColourMath.readableText(selected));
                 }
@@ -121,8 +122,10 @@ public final class CustomThemeActivity extends BaseActivity {
         }
         new AlertDialog.Builder(this).setTitle(LABELS[index]).setView(controls)
                 .setNegativeButton("Cancel", null).setPositiveButton("Use colour", (dialog, which) ->
-                        fields[index].setText(hex(0xff000000 | rgb[0] << 16 | rgb[1] << 8 | rgb[2]))).show();
+                        fields[index].setText(hex(rgb(rgb)))).show();
     }
+
+    private static int rgb(int[] channels) { return 0xff000000 | channels[0] << 16 | channels[1] << 8 | channels[2]; }
 
     private String hex(int colour) { return String.format(Locale.ROOT, "#%06X", colour & 0xffffff); }
 

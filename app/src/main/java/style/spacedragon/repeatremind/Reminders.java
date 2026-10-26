@@ -14,11 +14,14 @@ import android.net.Uri;
 import android.os.Build;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ArrayList;
 
 final class Reminders {
     private static final String CHANNEL = "task_reminders";
+    /** Task IDs start at 1, so 0 is free for the before-work reminder. */
+    static final int WORK_NOTIFICATION = 0;
 
     private Reminders() { }
 
@@ -65,7 +68,17 @@ final class Reminders {
             earliest = Math.min(earliest, task.nextAlarm());
         }
         if (changed) store.save(tasks);
-        if (allowed(context)) for (Task task : due) show(context, task);
+        Workdays work = store.workdays();
+        Workdays.Update workUpdate = null;
+        if (work != null) {
+            workUpdate = work.update(now, zone, clockChanged);
+            if (workUpdate.changed) store.workdays(work);
+            earliest = Math.min(earliest, work.nextAlarm(now, zone));
+        }
+        if (allowed(context)) {
+            for (Task task : due) show(context, task);
+            if (workUpdate != null && workUpdate.notify != null) showWork(context, work, workUpdate.notify);
+        }
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
         PendingIntent operation = PendingIntent.getBroadcast(context, 0,
                 new Intent(context, ReminderReceiver.class),
@@ -89,28 +102,53 @@ final class Reminders {
         context.getSystemService(NotificationManager.class).cancel(id);
     }
 
-    static boolean setCompleted(Context context, int id, long occurrence, boolean value) {
+    // reconcile() clears the notification of any task that becomes completed or ignored.
+    static void setCompleted(Context context, int id, long occurrence, boolean value) {
         reconcile(context, false);
         TaskStore store = new TaskStore(context);
         List<Task> tasks = store.load();
         for (Task task : tasks) {
             if (task.id == id && task.setCompleted(occurrence, value, Instant.now())) {
-                store.save(tasks); clear(context, id); reconcile(context, false); return true;
+                store.save(tasks); reconcile(context, false); return;
             }
         }
-        return false;
     }
 
-    static boolean setIgnored(Context context, int id, long occurrence, boolean value) {
+    /** An occurrence of -1 applies to the task regardless of which occurrence is current. */
+    static void setIgnored(Context context, int id, long occurrence, boolean value) {
         reconcile(context, false);
         TaskStore store = new TaskStore(context);
         List<Task> tasks = store.load();
+        Instant now = Instant.now();
         for (Task task : tasks) {
-            if (task.id != id || (occurrence != -1 && task.occurrenceId != occurrence)) continue;
-            task.setIgnored(value, Instant.now());
-            store.save(tasks); clear(context, id); reconcile(context, false); return true;
+            if (task.id != id) continue;
+            if (occurrence == -1) task.setIgnored(value, now);
+            else if (!task.ignoreOccurrence(occurrence, now)) return;
+            store.save(tasks); reconcile(context, false); return;
         }
-        return false;
+    }
+
+    private static void showWork(Context context, Workdays work, Workdays.Occurrence shift) {
+        ZoneId zone = ZoneId.systemDefault();
+        DateTimeFormatter time = DateTimeFormatter.ofPattern(
+                android.text.format.DateFormat.is24HourFormat(context) ? "HH:mm" : "h:mm a");
+        String text = WorkText.plan(work, shift, zone, time);
+        Intent intent = new Intent(context, MainActivity.class)
+                .putExtra("tab", MainActivity.WORK_TAB).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent open = PendingIntent.getActivity(context, WORK_NOTIFICATION, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        long untilStart = shift.startAt.toEpochMilli() - System.currentTimeMillis();
+        Notification notification = new Notification.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Work at " + shift.startAt.atZone(zone).format(time))
+                .setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(open).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setTimeoutAfter(Math.max(1, untilStart)).setCategory(Notification.CATEGORY_REMINDER).build();
+        try {
+            context.getSystemService(NotificationManager.class).notify(WORK_NOTIFICATION, notification);
+        } catch (SecurityException ignored) {
+            // Notification permission can be revoked between the check and posting.
+        }
     }
 
     private static Notification.Action action(Context context, Task task, String action, int title, int icon) {

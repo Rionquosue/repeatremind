@@ -28,6 +28,11 @@ final class ScheduleText {
         };
     }
 
+    /** " · until <last day>" for a temporary task, otherwise empty. */
+    static String until(TaskState task) {
+        return task.temporary ? " · until " + task.endDate().minusDays(1).format(dateFormat()) : "";
+    }
+
     private static String selected(int bits) {
         List<String> labels = new ArrayList<>();
         for (int i = 0; i < 7; i++) if ((bits & (1 << i)) != 0) labels.add(DAYS[i]);

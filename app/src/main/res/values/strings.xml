@@ -3,11 +3,13 @@
     <string name="reminder_channel">Task reminders</string>
     <string name="strict_biweekly">Strict · every 14 days</string>
     <string name="calendar_biweekly">Selected days of each month</string>
-    <string name="add_reminder">Add reminder</string>
+    <string name="add_reminder">Enable reminder</string>
+    <string name="temporary_task">Temporary task</string>
+    <string name="work_reminder">Remind me before work</string>
+    <string name="work_break">Break</string>
     <string name="task_enabled">Task enabled</string>
     <string name="completed">Completed</string>
     <string name="ignore">Ignore</string>
-    <string name="resume_reminders">Resume reminders</string>
     <string name="additional_reminders">Send additional reminders if not complete</string>
     <string name="ignore_reminders">Ignore reminders until re-enabled</string>
 </resources>

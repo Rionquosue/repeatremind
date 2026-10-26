@@ -8,11 +8,12 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/AppTheme.Light">
         <activity android:name=".TaskEditorActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".WorkdaysActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".CustomThemeActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />

@@ -21,6 +21,7 @@ public final class ReminderStateTest {
         scheduleHistory();
         allSchedules();
         validation();
+        temporaryTasks();
         System.out.println("PASS: " + assertions + " reminder state assertions");
     }
 
@@ -284,6 +285,43 @@ public final class ReminderStateTest {
         update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-01T09:00:00Z");
         equal(t.followUpAt, "2027-01-01T09:00:00Z", "Long intervals use 64-bit arithmetic");
         equal(t.nextAlarm(), "2026-01-02T09:00:00Z", "Base recurrence wins over longer interval");
+    }
+
+    private static void temporaryTasks() {
+        check(new TaskState().hasReminder, "Reminders are enabled by default");
+        TaskState t = task(); t.followUpEnabled = false;
+        t.temporary = true; t.temporaryLength = 1; t.temporarySpan = TaskState.Span.WEEKS;
+        check(t.endDate().equals(LocalDate.of(2026, 1, 8)), "One week from the start date");
+        check(!t.expired(LocalDate.of(2026, 1, 7)) && t.expired(LocalDate.of(2026, 1, 8)), "Expiry is exclusive");
+        update(t, "2026-01-01T08:00:00Z");
+        check(update(t, "2026-01-07T09:00:00Z").notify && t.enabled, "Runs until its last day");
+        TaskState.Update ended = update(t, "2026-01-10T12:00:00Z");
+        check(!t.enabled && ended.changed && ended.clearNotification, "Disables itself after the period");
+        check(t.nextAlarm() == Long.MAX_VALUE, "No alarm after the period");
+        check(t.history.lastKey().equals(LocalDate.of(2026, 1, 7)) && t.history.size() == 7,
+                "History stops at the last day");
+        check(!update(t, "2026-01-11T09:00:00Z").notify, "Stays silent once ended");
+
+        t = task(); t.temporary = true; t.temporaryLength = 1; t.temporarySpan = TaskState.Span.MONTHS;
+        t.schedule.start = LocalDate.of(2026, 1, 31);
+        check(t.endDate().equals(LocalDate.of(2026, 2, 28)), "Months clamp to short months");
+        t.temporaryLength = 2; t.temporarySpan = TaskState.Span.YEARS;
+        check(t.endDate().equals(LocalDate.of(2028, 1, 31)), "Years");
+        t.temporaryLength = 10; t.temporarySpan = TaskState.Span.DAYS;
+        check(t.endDate().equals(LocalDate.of(2026, 2, 10)), "Days");
+        for (int value : new int[]{0, -1, TaskState.MAX_TEMPORARY_LENGTH + 1}) {
+            t.temporaryLength = value;
+            try { t.validate(); throw new AssertionError("Invalid temporary length accepted"); }
+            catch (IllegalArgumentException expected) { assertions++; }
+        }
+        t.temporary = false; t.validate(); assertions++; // Length is ignored when not temporary.
+        check(t.endDate() == null && !t.expired(LocalDate.of(2099, 1, 1)), "Permanent tasks never expire");
+
+        TaskState stored = task(); update(stored, "2026-01-01T08:00:00Z");
+        TaskState edited = task(); edited.temporary = true; edited.temporaryLength = 3; edited.temporarySpan = TaskState.Span.DAYS;
+        stored.configureFrom(edited, at("2026-01-01T08:30:00Z"), UTC);
+        check(stored.temporary && stored.temporaryLength == 3 && stored.temporarySpan == TaskState.Span.DAYS,
+                "Edits copy temporary settings");
     }
 
     private static TaskState task() {
