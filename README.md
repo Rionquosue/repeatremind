@@ -94,15 +94,10 @@ sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
 Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/path/to/sdk`.
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installed directly.
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
-sign it with your own private key before distributing. Never commit signing keys.
-The GitHub Actions workflow tests both variants and publishes only the optimized unsigned APK
-on the repository's **Releases** page. Debug APKs are not uploaded or published.
-Release tags follow `versionName`, starting at **V0.1.1**. Increase `versionName` and `versionCode`
-for each new release; retries of the same commit can replace its asset. The internal versionCode
-continues increasing to permit upgrades despite restarting the displayed version number.
-Manual workflow runs on main also publish; pull requests only build and test.
-Sign `RepeatRemind-release-unsigned.apk` with your own key before installing.
-No signing keys are added to the repository.
+sign it with your own private key before installing or distributing. Never commit signing keys.
+The GitHub Actions workflow builds and tests both variants on pushes to main and pull requests.
+It does not publish releases or upload APKs, since unsigned builds cannot be installed.
+Increase `versionName` and `versionCode` for each release you sign and distribute.
 The build downloads tools only on the development machine; the installed app has no network access.
 
 `recurrenceTest` runs over 21,000 assertions without Android or third-party test libraries,
@@ -117,6 +112,6 @@ one delivery per shift, and workday labels. `reminderStateTest` also covers temp
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
 buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.
-CI runs these device tests on an Android 15 emulator before publishing the release.
+CI runs these device tests on an Android 15 emulator.
 
 The calendar/hourglass launcher icon is a small native vector with an adaptive-icon wrapper.

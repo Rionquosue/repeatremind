@@ -9,19 +9,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      release_tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - name: Read release version
-        id: version
-        shell: python
-        run: |
-          import os, pathlib, re
-          text = pathlib.Path('app/build.gradle').read_text()
-          version = re.search(r"versionName\s+['\"](\d+\.\d+\.\d+)['\"]", text).group(1)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'tag=V{version}\n')
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -70,58 +59,3 @@ jobs:
             smoke-crash.txt
             smoke-*.png
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        with:
-          name: RepeatRemind-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-  publish:
-    name: Publish GitHub Release
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: RepeatRemind-release-unsigned
-          path: dist/release
-      - name: Publish APKs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
-        run: |
-          cp dist/release/app-release-unsigned.apk dist/RepeatRemind-release-unsigned.apk
-          cat > release-notes.md <<'NOTES'
-          Automatically built and checked by GitHub Actions.
-
-          - Completion resets at the start of the next scheduled local date.
-          - Saved completion history and a Missed days tab.
-          - Completed buttons and single-line weekday highlights.
-          - Custom background, button, highlight, and text colours.
-
-          **RepeatRemind-release-unsigned.apk** is the optimized release build for Android 8.0+. Sign it with your own private key before installing. Debug builds remain local.
-          NOTES
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            EXISTING_SHA=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
-            if [ "$EXISTING_SHA" != "$GITHUB_SHA" ]; then
-              echo 'This version is already released. Increase versionName and versionCode before publishing another commit.' >&2
-              exit 1
-            fi
-            gh release upload "$RELEASE_TAG" dist/RepeatRemind-release-unsigned.apk --clobber
-            exit 0
-          fi
-          gh release create "$RELEASE_TAG" \
-            dist/RepeatRemind-release-unsigned.apk \
-            --target "$GITHUB_SHA" \
-            --title "RepeatRemind $RELEASE_TAG" \
-            --notes-file release-notes.md --latest
-      - name: Verify published release and APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
-        run: |
-          gh release view "$RELEASE_TAG" --json tagName,isDraft,assets > published-release.json
-          jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false and (.assets | length) == 1 and .assets[0].name == "RepeatRemind-release-unsigned.apk" and .assets[0].size > 0' published-release.json
