@@ -12,6 +12,8 @@
         android:theme="@style/AppTheme.Light">
         <activity android:name=".TaskEditorActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".WorkDayActivity" android:exported="false" />
+        <activity android:name=".ExportActivity" android:exported="false" />
         <activity android:name=".WorkdaysActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".CustomThemeActivity" android:exported="false"

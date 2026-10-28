@@ -47,14 +47,14 @@ public final class WorkdaysActivity extends BaseActivity {
             }
             render();
         } catch (JSONException | RuntimeException e) {
-            failOpen("Workdays could not be opened.");
+            failOpen("The schedule could not be opened.");
         }
     }
 
     private void render() {
         time = timeFormat();
         LinearLayout root = column();
-        root.addView(header("Workdays", button("Cancel", this::finish)));
+        root.addView(header("Schedule", button("Cancel", this::finish)));
         ScrollView scroll = new ScrollView(this);
         LinearLayout form = column();
         form.setPadding(dp(24), 0, dp(24), dp(24));
@@ -103,7 +103,7 @@ public final class WorkdaysActivity extends BaseActivity {
         preview = text("", 13, palette.secondary);
         form.addView(preview);
 
-        root.addView(actions(existing ? "Remove" : null, this::confirmRemove, "Save workdays", this::save));
+        root.addView(actions(existing ? "Remove" : null, this::confirmRemove, "Save schedule", this::save));
         updateMode(); install(root);
         root.setFocusableInTouchMode(true); root.requestFocus();
     }
@@ -260,7 +260,7 @@ public final class WorkdaysActivity extends BaseActivity {
     }
 
     private void confirmRemove() {
-        new AlertDialog.Builder(this).setTitle("Remove workdays?")
+        new AlertDialog.Builder(this).setTitle("Remove schedule?")
                 .setMessage("Your schedule, shifts and before-work reminder will be deleted.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Remove", (dialog, which) -> {
                     if (isFinishing()) return;

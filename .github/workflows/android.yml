@@ -48,6 +48,9 @@ jobs:
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-custom.png > smoke-custom.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-editor.png > smoke-editor.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-theme-0.png > smoke-theme-0.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-tracker.png > smoke-tracker.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-day.png > smoke-day.png
+            adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-export.png > smoke-export.png
             grep -q 'PASS:.*Android smoke checks' smoke-results.txt
       - name: Save device test results
         if: always()
