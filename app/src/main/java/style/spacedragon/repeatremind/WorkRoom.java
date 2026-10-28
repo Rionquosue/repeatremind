@@ -39,22 +39,46 @@ final class WorkRoom {
     private final MainActivity a;
     private YearMonth month = YearMonth.now();
     private WorkLog log;
+    private boolean stale = true;
+    /** The tracker's totals card, refreshed in place each minute. */
+    private LinearLayout clock;
+    private LocalDate clockDay;
     /** A job picked while not punched in; it is saved with the next punch in, not when picked. */
     private int chosenJob;
 
     WorkRoom(MainActivity activity) { a = activity; }
 
-    /** True while the tracker shows a running clock, so the screen refreshes each minute. */
-    boolean ticking(int sub) { return sub == TRACKER && log != null && log.working(); }
+    /** True while the tracker shows a running clock, so its totals update each minute. */
+    boolean ticking(int sub) { return sub == TRACKER && log != null && log.working() && clock != null; }
+
+    /** Reads the log again on the next render, e.g. after another screen may have changed it. */
+    void invalidate() { stale = true; }
+
+    /** Updates only the running totals, from the log already in memory: no reload, no rebuilt screen. */
+    boolean tick() {
+        if (clock == null || log == null) return false;
+        fillClock();
+        return log.working();
+    }
 
     void render(FrameLayout body, int sub, Workdays schedule) {
-        log = new WorkLogStore(a).load();
-        if (chosenJob != 0 && log.activeJobs().contains(chosenJob)) log.selected = chosenJob;
+        clock = null;
         ScrollView scroll = new ScrollView(a);
         LinearLayout content = a.column();
         content.setPadding(a.dp(20), a.dp(8), a.dp(20), a.dp(24));
         scroll.addView(content);
         body.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        if (sub != SCHEDULE && (log == null || stale)) {
+            try {
+                log = new WorkLogStore(a).load();
+                stale = false;
+            } catch (IllegalStateException e) {
+                log = null;
+                content.addView(a.text("Work hours could not be read: " + e.getMessage(), 15, a.palette.text));
+                return;
+            }
+        }
+        if (log != null && chosenJob != 0 && log.activeJobs().contains(chosenJob)) log.selected = chosenJob;
         switch (sub) {
             case DETAILS -> details(content);
             case SCHEDULE -> schedule(content, schedule);
@@ -97,8 +121,18 @@ final class WorkRoom {
         // A shift that runs past midnight keeps showing the day it started.
         var open = log.openWork(job);
         LocalDate day = open != null ? open.getKey() : LocalDate.now();
+        clock = a.card(18);
+        clockDay = day;
+        fillClock();
+        content.addView(clock, a.spaced());
+        content.addView(a.button("View day", () -> openDay(day)));
+    }
+
+    private void fillClock() {
+        LinearLayout card = clock;
+        LocalDate day = clockDay;
+        card.removeAllViews();
         WorkLog.Totals totals = log.totals(day, now());
-        LinearLayout card = a.card(18);
         TextView title = a.text(day.equals(LocalDate.now()) ? "Today" : day.format(DAY), 19, a.palette.text);
         title.setTypeface(null, Typeface.BOLD); card.addView(title);
         List<Integer> working = log.workingJobs();
@@ -116,8 +150,6 @@ final class WorkRoom {
                 a.line(card, log.jobName(other) + " · worked " + WorkCsv.clock(log.totals(day, now(), other).worked()));
             }
         }
-        content.addView(card, a.spaced());
-        content.addView(a.button("View day", () -> openDay(day)));
     }
 
     /** "Punched in", "Productive" or "On break" for a punched-in job; "Off" otherwise. */
@@ -219,7 +251,7 @@ final class WorkRoom {
 
     private void save() {
         try { new WorkLogStore(a).save(log); }
-        catch (RuntimeException e) { a.error(e); }
+        catch (RuntimeException e) { a.message("Work hours could not be saved: " + e.getMessage()); stale = true; }
         a.rerender();
     }
 
@@ -253,6 +285,7 @@ final class WorkRoom {
         LocalDate first = month.atDay(1);
         int lead = first.getDayOfWeek().getValue() - 1;
         long monthWorked = 0, monthProductive = 0;
+        java.util.TreeMap<Integer, Long> perJob = new java.util.TreeMap<>();
         int worked = 0;
         LinearLayout row = null;
         for (int cell = 0; cell < lead + month.lengthOfMonth(); cell++) {
@@ -270,6 +303,7 @@ final class WorkRoom {
                 worked++;
                 monthWorked += totals.worked();
                 monthProductive += totals.productive;
+                for (int job : log.jobsOn(date)) perJob.merge(job, log.totals(date, now, job).worked(), Long::sum);
             }
             row.addView(dayCell(date, totals, date.equals(today)), new LinearLayout.LayoutParams(0, a.dp(56), 1));
         }
@@ -283,10 +317,6 @@ final class WorkRoom {
             a.line(summary, "Productive " + WorkCsv.clock(monthProductive) + " · "
                     + (monthWorked == 0 ? 0 : Math.round(100.0 * monthProductive / monthWorked)) + "% of worked time");
             // A line per job once more than one job has work this month.
-            java.util.TreeMap<Integer, Long> perJob = new java.util.TreeMap<>();
-            for (LocalDate date = first; !date.isAfter(month.atEndOfMonth()); date = date.plusDays(1)) {
-                for (int job : log.jobsOn(date)) perJob.merge(job, log.totals(date, now, job).worked(), Long::sum);
-            }
             if (perJob.size() > 1) {
                 for (var entry : perJob.entrySet()) {
                     a.line(summary, log.jobName(entry.getKey()) + " · worked " + WorkCsv.clock(entry.getValue()));

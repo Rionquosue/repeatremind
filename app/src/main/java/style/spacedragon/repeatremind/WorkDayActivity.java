@@ -174,10 +174,12 @@ public final class WorkDayActivity extends BaseActivity {
     private void pickTime(WorkLog.Period period, boolean start) {
         ZonedDateTime current = local(start ? period.start : period.end);
         new TimePickerDialog(this, (picker, hour, minute) -> {
-            LocalDateTime picked = current.toLocalDate().atTime(hour, minute);
+            // Times are read on the day the period starts; an end at or before the start means the next day,
+            // e.g. a night shift. Using the current end's date would turn a shortened night shift into 24 hours.
+            LocalDate base = local(period.start).toLocalDate();
+            LocalDateTime picked = base.atTime(hour, minute);
+            if (!start && !picked.atZone(zone()).isAfter(local(period.start))) picked = picked.plusDays(1);
             long requested = picked.atZone(zone()).toEpochSecond();
-            // An end picked before the start means the next morning, e.g. a night shift.
-            if (!start && requested <= period.start) requested += 24 * 3600;
             long applied = log.move(day, period, start, requested, now(), zone());
             if (applied != requested) {
                 Toast.makeText(this, "Adjusted to " + clock(applied) + " to fit the other periods", Toast.LENGTH_LONG).show();

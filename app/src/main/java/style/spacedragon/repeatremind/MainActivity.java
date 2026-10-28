@@ -51,8 +51,14 @@ public final class MainActivity extends BaseActivity {
     private DateTimeFormatter time, dayTime;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = () -> { if (resumed) act(() -> Reminders.reconcile(this, false)); };
-    // Redraws a running punch clock each minute while visible; it reads nothing but the work log.
-    private final Runnable tick = () -> { if (resumed && data != null) render(); };
+    // Updates a running punch clock's totals each minute while visible, from memory; nothing is read or written.
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            if (resumed && room == WORK && work.tick()) refreshHandler.postDelayed(this, untilNextMinute());
+        }
+    };
+
+    private static long untilNextMinute() { return 60_000 - System.currentTimeMillis() % 60_000 + 50; }
     // Picks up writes from receivers while visible; this activity's own writes render directly.
     private final SharedPreferences.OnSharedPreferenceChangeListener taskChanges = (prefs, key) -> {
         if (("tasks".equals(key) || "work".equals(key)) && resumed && !writing) {
@@ -113,6 +119,7 @@ public final class MainActivity extends BaseActivity {
                 || custom[2] != palette.highlight || custom[3] != palette.text))) { recreate(); return; }
         resumed = true;
         launching = false;
+        work.invalidate(); // The day view may have changed the work log.
         getSharedPreferences(TaskStore.PREFERENCES, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(taskChanges);
         refresh.run();
     }
@@ -180,7 +187,7 @@ public final class MainActivity extends BaseActivity {
         refreshHandler.removeCallbacks(refresh);
         refreshHandler.removeCallbacks(tick);
         if (resumed && room == WORK && work.ticking(workRoom)) {
-            refreshHandler.postDelayed(tick, 60_000 - System.currentTimeMillis() % 60_000 + 50);
+            refreshHandler.postDelayed(tick, untilNextMinute());
         }
         long next = tasks.stream().mapToLong(t -> t.nextDue).filter(t -> t > 0).min().orElse(Long.MAX_VALUE);
         if (schedule != null) next = Math.min(next, schedule.nextAlarm(Instant.now(), ZoneId.systemDefault()));

@@ -21,6 +21,7 @@ public final class WorkLogTest {
         storage();
         csv();
         jobs();
+        reviewFixes();
         System.out.println("PASS: " + assertions + " work log assertions");
     }
 
@@ -226,9 +227,6 @@ public final class WorkLogTest {
         WorkLog legacy = new WorkLog();
         legacy.read(DAY, "W" + at("09:00") + "-" + at("17:00"));
         check(legacy.work(DAY).get(0).job == J, "Work saved before jobs belongs to the first job");
-        WorkLog marked = new WorkLog();
-        marked.read(DAY, "W" + at("09:00") + "-" + at("17:00") + "@2,P" + at("10:00") + "-" + at("11:00"));
-        check(marked.periods(DAY).get(1).job == 2, "An unmarked child inside another job's work takes that job");
         // Moving work to another job is refused when it would overlap that job's work.
         try { log.setJob(DAY, cafeWork, J, 0); throw new AssertionError("Moved work onto overlapping work"); }
         catch (IllegalArgumentException expected) { assertions++; }
@@ -250,6 +248,66 @@ public final class WorkLogTest {
         log.punchIn(cafe, at("18:00"), UTC);
         try { log.removeJob(cafe); throw new AssertionError("Removed a job that is punched in"); }
         catch (IllegalArgumentException expected) { assertions++; }
+    }
+
+    private static void reviewFixes() {
+        // Punching in inside work already recorded for that job is refused instead of double-counting.
+        WorkLog log = new WorkLog();
+        log.addWork(DAY, 0, UTC, J);
+        try { log.punchIn(J, at("14:00"), UTC); throw new AssertionError("Punched in inside recorded work"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        log.punchIn(J, at("17:00"), UTC);
+        check(log.working(J), "Punching in where recorded work ends is fine");
+        int other = log.addJob("Other");
+        log.punchIn(other, at("14:00"), UTC);
+        check(log.working(other), "Another job can punch in during this job's recorded work");
+
+        // A shift past midnight limits the next day's work for the same job.
+        log = new WorkLog();
+        LocalDate next = DAY.plusDays(1);
+        log.punchIn(J, at("22:00"), UTC);
+        long nextDay = next.atStartOfDay(UTC).toEpochSecond();
+        try { log.addWork(next, nextDay + 3600, UTC, J); throw new AssertionError("Added work during a running shift"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        log.punchOut(J, nextDay + 10 * 3600); // 22:00 to 10:00 the next day
+        WorkLog.Period added = log.addWork(next, nextDay + 12 * 3600, UTC, J);
+        check(added.start == nextDay + 10 * 3600, "New work steps past a shift from the day before");
+        check(log.clamp(next, added, true, nextDay + 3600, 0, UTC) == nextDay + 10 * 3600,
+                "A start cannot move into the previous day's shift");
+
+        // Moving running work to a job that is already punched in is refused.
+        log = new WorkLog();
+        int second = log.addJob("Second");
+        log.punchIn(second, at("08:00"), UTC);
+        log.punchIn(J, at("09:00"), UTC);
+        try { log.setJob(DAY, log.work(DAY, J).get(0), second, at("10:00")); throw new AssertionError("Two running periods"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+
+        // On a 23-hour day a work start cannot move onto the next date.
+        ZoneId toronto = ZoneId.of("America/Toronto");
+        LocalDate spring = LocalDate.of(2026, 3, 8);
+        log = new WorkLog();
+        WorkLog.Period late = log.addWork(spring, 0, toronto, J);
+        late.end = spring.plusDays(1).atStartOfDay(toronto).toEpochSecond() + 2 * 3600;
+        long limit = log.clamp(spring, late, true, late.end - 600, 0, toronto);
+        check(WorkLog.date(limit, toronto).equals(spring), "Start stays on its own date across DST");
+
+        // A period without a work period of its job (damaged data) is left alone rather than crashing.
+        log = new WorkLog();
+        log.read(DAY, "W" + at("09:00") + "-" + at("17:00") + "@2,P" + at("10:00") + "-" + at("11:00"));
+        WorkLog.Period orphan = log.periods(DAY).get(1);
+        check(log.clamp(DAY, orphan, true, at("09:30"), 0, UTC) == at("10:00"), "Orphaned period is not moved");
+
+        // The running-work lookup follows changes.
+        log = new WorkLog();
+        check(!log.working(J), "Not working");
+        log.punchIn(J, at("09:00"), UTC);
+        check(log.working(J), "Lookup sees punch in");
+        log.punchOut(J, at("10:00"));
+        check(!log.working(J), "Lookup sees punch out");
+        log.punchIn(J, at("11:00"), UTC);
+        log.remove(DAY, log.work(DAY, J).get(1));
+        check(!log.working(J), "Lookup sees removal");
     }
 
     /** 9:00–17:00 work with productive 9:30–11:30 and lunch 12:00–13:00. */
