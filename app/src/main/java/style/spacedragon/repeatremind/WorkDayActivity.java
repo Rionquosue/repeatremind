@@ -22,9 +22,11 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-/** One day of work as a candle graph: work in the first column, productive, unproductive and break time in the second. */
+/** One day of work as a candle graph: work, productive over unproductive time, and lunch/breaks in three columns. */
 public final class WorkDayActivity extends BaseActivity {
     private static final String[] KIND_NAMES = {"Work", "Productive", "Lunch/break"};
     private LocalDate day;
@@ -211,12 +213,13 @@ public final class WorkDayActivity extends BaseActivity {
         final WorkLog.Period period;
         final boolean start;
         float x, y;
+        int column;
 
         Handle(WorkLog.Period period, boolean start) { this.period = period; this.start = start; }
     }
 
     /**
-     * Two candle columns on a time axis. Dragging a handle moves its edge in five-minute steps; tapping a
+     * Three candle columns on a time axis: work, productive (over unproductive work time) and breaks. Dragging a handle moves its edge in five-minute steps; tapping a
      * handle opens the time picker; tapping a bar opens its options.
      */
     private final class Candle extends View {
@@ -240,7 +243,7 @@ public final class WorkDayActivity extends BaseActivity {
         }
 
         private float hourHeight() { return dp(60); }
-        private float top() { return dp(14); }
+        private float top() { return dp(30); }
 
         /** Whole hours around the recorded periods, at least eight; 8:00–18:00 on an empty day. */
         private void computeRange() {
@@ -268,9 +271,19 @@ public final class WorkDayActivity extends BaseActivity {
 
         private long seconds(float y) { return rangeStart + Math.round((y - top()) / hourHeight() * 3600); }
 
+        private static final int COLUMNS = 3;
+        private final String[] titles = {"Work", "Productive", "Break"};
+
         private float axis() { return dp(56); }
-        private float columnWidth() { return (getWidth() - axis() - dp(12) * 3) / 2f; }
-        private float column(int index) { return axis() + dp(12) + index * (columnWidth() + dp(12)); }
+        private float gap() { return dp(10); }
+        private float columnWidth() { return (getWidth() - axis() - gap() * (COLUMNS + 1)) / COLUMNS; }
+        private float column(int index) { return axis() + gap() + index * (columnWidth() + gap()); }
+        private float handleRadius() { return dp(9); }
+
+        /** Outline shades: the usual border, and two slightly different contrasts for candles whose handles overlap. */
+        private int outline(int shade) {
+            return shade == 0 ? palette.border : ColourMath.blend(palette.border, palette.text, shade == 1 ? .35 : .75);
+        }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
@@ -278,6 +291,7 @@ public final class WorkDayActivity extends BaseActivity {
             long now = now();
             label.setColor(palette.secondary);
             label.setTextSize(dp(12));
+            label.setTextAlign(Paint.Align.LEFT);
             stroke.setStyle(Paint.Style.STROKE);
             for (long hour = rangeStart; hour <= rangeEnd; hour += 3600) {
                 float y = y(hour);
@@ -286,52 +300,111 @@ public final class WorkDayActivity extends BaseActivity {
                 canvas.drawText(clock(hour), 0, y + dp(4), label);
             }
             stroke.setAlpha(255);
+            label.setTextAlign(Paint.Align.CENTER);
+            for (int i = 0; i < COLUMNS; i++) canvas.drawText(titles[i], column(i) + columnWidth() / 2, dp(16), label);
+
+            // Candles: work; productive over unproductive work time; breaks in their own column.
             float w = columnWidth(), radius = dp(8);
             for (WorkLog.Period work : log.work(day)) {
-                drawBar(canvas, work, column(0), w, palette.button, false, now);
-                // The second column shows the work period as unproductive, with productive and break time on top.
-                rect.set(column(1), y(work.start), column(1) + w, y(work.end(now)));
-                fill.setColor(palette.surface);
-                canvas.drawRoundRect(rect, radius, radius, fill);
-                stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1));
-                canvas.drawRoundRect(rect, radius, radius, stroke);
-                for (WorkLog.Period child : log.children(day, work, now)) {
-                    drawBar(canvas, child, column(1), w,
-                            child.kind == WorkLog.Kind.PRODUCTIVE ? palette.highlight : breakColour(), true, now);
+                candle(work, 0, now);
+                List<WorkLog.Period> children = log.children(day, work, now);
+                // Unproductive time is the work period outside breaks; productive time is drawn over it.
+                long from = work.start;
+                for (WorkLog.Period child : children) {
+                    if (child.kind != WorkLog.Kind.BREAK) continue;
+                    track(canvas, from, child.start);
+                    from = Math.max(from, child.end(now));
                 }
+                track(canvas, from, work.end(now));
+                // The break column shows the work period faintly, for context.
+                rect.set(column(2), y(work.start), column(2) + w, y(work.end(now)));
+                stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1)); stroke.setAlpha(110);
+                canvas.drawRoundRect(rect, radius, radius, stroke);
+                stroke.setAlpha(255);
+                for (WorkLog.Period child : children) candle(child, child.kind == WorkLog.Kind.PRODUCTIVE ? 1 : 2, now);
+            }
+            Map<WorkLog.Period, Integer> shades = spread();
+            for (int i = 0; i < bars.size(); i++) {
+                WorkLog.Period period = barPeriods.get(i);
+                fill.setColor(period.kind == WorkLog.Kind.WORK ? palette.button
+                        : period.kind == WorkLog.Kind.PRODUCTIVE ? palette.highlight : breakColour());
+                canvas.drawRoundRect(bars.get(i), radius, radius, fill);
+                int shade = shades.getOrDefault(period, 0);
+                stroke.setColor(outline(shade)); stroke.setStrokeWidth(dp(shade == 0 ? 1 : 2));
+                canvas.drawRoundRect(bars.get(i), radius, radius, stroke);
             }
             if (log.periods(day).stream().anyMatch(WorkLog.Period::open) && now >= rangeStart && now <= rangeEnd) {
                 stroke.setColor(palette.text); stroke.setStrokeWidth(dp(1.5f));
                 canvas.drawLine(axis(), y(now), getWidth(), y(now), stroke);
             }
+            // Handles are one solid colour; an overlapping one gets a ring in its candle's outline shade.
+            float r = handleRadius();
             for (Handle handle : handles) {
-                fill.setColor(palette.background);
-                canvas.drawCircle(handle.x, handle.y, dp(9), fill);
-                stroke.setColor(palette.text); stroke.setStrokeWidth(dp(2));
-                canvas.drawCircle(handle.x, handle.y, dp(9), stroke);
+                int shade = shades.getOrDefault(handle.period, 0);
+                if (shade != 0) {
+                    fill.setColor(outline(shade));
+                    canvas.drawCircle(handle.x, handle.y, r + dp(4), fill);
+                    fill.setColor(palette.background);
+                    canvas.drawCircle(handle.x, handle.y, r + dp(2), fill);
+                }
+                fill.setColor(palette.text);
+                canvas.drawCircle(handle.x, handle.y, r, fill);
             }
         }
 
-        private void drawBar(Canvas canvas, WorkLog.Period period, float left, float width, int colour,
-                boolean outlined, long now) {
-            float top = y(period.start), bottom = Math.max(y(period.end(now)), top + dp(2));
-            RectF bar = new RectF(left, top, left + width, bottom);
-            fill.setColor(colour);
-            canvas.drawRoundRect(bar, dp(8), dp(8), fill);
-            if (outlined) {
-                stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1));
-                canvas.drawRoundRect(bar, dp(8), dp(8), stroke);
-            }
-            bars.add(bar); barPeriods.add(period);
-            // Start handles sit left of centre and end handles right, so adjacent edges never hide each other.
+        /** Unproductive time in the productive column. */
+        private void track(Canvas canvas, long from, long to) {
+            if (to <= from) return;
+            rect.set(column(1), y(from), column(1) + columnWidth(), y(to));
+            fill.setColor(palette.surface);
+            canvas.drawRoundRect(rect, dp(8), dp(8), fill);
+            stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1));
+            canvas.drawRoundRect(rect, dp(8), dp(8), stroke);
+        }
+
+        /** Records a candle and its handles, centred on the candle; a running period has no end handle. */
+        private void candle(WorkLog.Period period, int column, long now) {
+            float left = column(column), top = y(period.start);
+            float bottom = Math.max(y(period.end(now)), top + dp(2));
+            bars.add(new RectF(left, top, left + columnWidth(), bottom));
+            barPeriods.add(period);
+            float centre = left + columnWidth() / 2;
             Handle start = new Handle(period, true);
-            start.x = left + width * .3f; start.y = top;
+            start.x = centre; start.y = top; start.column = column;
             handles.add(start);
             if (!period.open()) {
                 Handle end = new Handle(period, false);
-                end.x = left + width * .7f; end.y = bottom;
+                end.x = centre; end.y = bottom; end.column = column;
                 handles.add(end);
             }
+        }
+
+        /**
+         * Moves handles that would overlap in a column apart sideways, and gives each period in such a group
+         * its own outline shade, so a handle can be matched to its candle.
+         */
+        private Map<WorkLog.Period, Integer> spread() {
+            Map<WorkLog.Period, Integer> shades = new HashMap<>();
+            float apart = handleRadius() * 2 + dp(6);
+            for (int column = 0; column < COLUMNS; column++) {
+                List<Handle> inColumn = new ArrayList<>();
+                for (Handle handle : handles) if (handle.column == column) inColumn.add(handle);
+                inColumn.sort((a, b) -> Float.compare(a.y, b.y));
+                for (int i = 0; i < inColumn.size(); ) {
+                    int j = i + 1;
+                    while (j < inColumn.size() && inColumn.get(j).y - inColumn.get(j - 1).y < apart) j++;
+                    int size = j - i;
+                    if (size > 1) {
+                        for (int k = 0; k < size; k++) {
+                            Handle handle = inColumn.get(i + k);
+                            handle.x += (k - (size - 1) / 2f) * apart;
+                            shades.putIfAbsent(handle.period, 1 + k % 2);
+                        }
+                    }
+                    i = j;
+                }
+            }
+            return shades;
         }
 
         @Override public boolean onTouchEvent(MotionEvent event) {
