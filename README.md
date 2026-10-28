@@ -7,6 +7,9 @@ Android cloud backup and device transfer are disabled.
 
 ## Use
 
+The app has three rooms, switched with the icon bar at the bottom: **Reminders**, **Missed days** and
+**Work tracker**.
+
 - Tap **+** to add a task. An empty list shows only an arrow and the add button below the header.
 - Choose every day, selected weekdays, weekly, bi-weekly, monthly, or yearly.
 - Weekly repeats from the start date. Strict biweekly repeats every **14 local calendar days**
@@ -43,9 +46,26 @@ Android cloud backup and device transfer are disabled.
 - **Temporary task** runs for a set number of days, weeks, months or years counted from the start
   date, then disables itself. The list shows its last day and then **Ended**. Missed days stop at
   the last day. To run it again, lengthen it or move the start date, then re-enable it.
-- The **Workdays** tab sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
+- **Work tracker → Tracker** has three toggles that highlight while on: **Punch in/out**,
+  **Start/stop productive** and **Start/stop lunch/break**. Productive time and breaks never run together,
+  starting either one punches you in, and punching out stops everything. Today's worked, productive,
+  unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
+  nothing is written on a timer. A shift past midnight stays on the day it started.
+- **Work tracker → Details** is a calendar: each worked day has a circle that grows with the hours
+  worked. Tap a day for its candle graph: work periods in the first column; productive, unproductive
+  and break time in the second. Drag the round handles at the start and end of a period to move it in
+  5-minute steps, or tap a handle to set the exact minute with the system time picker. Periods never
+  overlap, and productive and break time stay inside their work period. The list below the graph does
+  the same with buttons, and can add or delete periods. Worked time excludes breaks; unproductive time is
+  worked time that was not productive.
+- **Export CSV** (in Details) saves the month shown, or every recorded day, wherever you choose. It has
+  one row per day: date, weekday, first in, last out, punched, break, worked, productive and
+  unproductive hours (decimal), productive percentage, and the number of work periods. The file is UTF-8
+  with a byte-order mark, so spreadsheets read it directly. Choosing the location uses Android's own
+  file picker and needs no storage permission.
+- **Work tracker → Schedule** sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
   select the days you work, or **shift work** (e.g. retail) and enter start and end times for each day;
-  days without times are off. The tab prompts you when no shifts are entered for the next 7 days.
+  days without times are off. It prompts you when no shifts are entered for the next 7 days.
   Shifts can run past midnight and have an optional break inside the shift. Set **Prep time**,
   **Commute time** and how many minutes before prep to be reminded: the reminder goes off at
   shift start − commute − prep − reminder. It fires once per shift and is skipped once the shift starts.
@@ -113,10 +133,12 @@ clock changes, and unchanged recurrence dates for every schedule. `ColourMathTes
 and readable label contrast over a grid of sRGB colours. `ScheduleTest` checks schedule copying,
 validation, list labels, and the date-level recurrence helpers. `WorkdaysTest` checks shift and
 break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
-one delivery per shift, and workday labels. `ReminderStateTest` also covers temporary tasks,
+one delivery per shift, and workday labels. `WorkLogTest` checks the punch clock toggles, totals,
+editing limits and 5-minute snapping, adding and deleting periods, night shifts, storage and the CSV. `ReminderStateTest` also covers temporary tasks,
 wake-up selection, late completion, clock changes and compact history storage.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
-buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
+buttons, weekday highlights, missed-history filtering, the work tracker toggles, calendar and day view,
+custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.
 CI runs these device tests on an Android 15 emulator.
 

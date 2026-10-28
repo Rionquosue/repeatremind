@@ -9,7 +9,9 @@ tasks.register('compileRecurrenceTests', JavaCompile) {
             'app/src/main/java/style/spacedragon/repeatremind/ColourMath.java',
             'app/src/main/java/style/spacedragon/repeatremind/ScheduleText.java',
             'app/src/main/java/style/spacedragon/repeatremind/Workdays.java',
-            'app/src/main/java/style/spacedragon/repeatremind/WorkText.java') + fileTree('tests').matching { include '*.java' }
+            'app/src/main/java/style/spacedragon/repeatremind/WorkText.java',
+            'app/src/main/java/style/spacedragon/repeatremind/WorkLog.java',
+            'app/src/main/java/style/spacedragon/repeatremind/WorkCsv.java') + fileTree('tests').matching { include '*.java' }
     classpath = files()
     sourceCompatibility = '17'
     targetCompatibility = '17'

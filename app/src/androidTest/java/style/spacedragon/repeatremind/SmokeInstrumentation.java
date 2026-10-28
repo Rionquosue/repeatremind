@@ -45,6 +45,8 @@ public final class SmokeInstrumentation extends Instrumentation {
         int originalTheme = preferences.getInt("theme", 0);
         int originalNext = preferences.getInt("next_id", 1);
         int[] originalCustom = new TaskStore(context).customColours();
+        SharedPreferences workLog = context.getSharedPreferences("repeatremind_worklog", Context.MODE_PRIVATE);
+        java.util.Map<String, ?> originalWorkLog = new java.util.HashMap<>(workLog.getAll());
         int resultCode = Activity.RESULT_CANCELED;
         try {
             Set<String> permissions = new HashSet<>(Arrays.asList(context.getPackageManager()
@@ -239,6 +241,38 @@ public final class SmokeInstrumentation extends Instrumentation {
                     "Missed tab excludes completed days and current task controls");
             screenshot("smoke-missed.png"); ui(history::finish); waitForIdleSync();
 
+            // Work tracker: toggles, calendar, day view and schedule, through the real activity and store.
+            workLog.edit().clear().commit();
+            Activity tracker = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            waitForIdleSync();
+            ui(() -> findText(tracker, "Work tracker").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch in") != null, "Work tracker room shows the punch clock");
+            ui(() -> findText(tracker, "Start productive").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Stop productive") != null && findText(tracker, "Punch out") != null,
+                    "Starting productive time punches in");
+            check(findText(tracker, "Stop productive").isSelected() && findText(tracker, "Punch out").isSelected(),
+                    "Active toggles are highlighted");
+            check(new WorkLogStore(context).load().running(WorkLog.Kind.PRODUCTIVE), "Productive time is stored");
+            ui(() -> findText(tracker, "Start lunch/break").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Stop lunch/break") != null && findText(tracker, "Start productive") != null,
+                    "A break ends productive time");
+            screenshot("smoke-tracker.png");
+            ui(() -> findText(tracker, "Punch out").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch in") != null && findText(tracker, "Start lunch/break") != null
+                    && !new WorkLogStore(context).load().working(), "Punching out stops everything");
+            ui(() -> findText(tracker, "Details").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Export CSV") != null, "Details shows the calendar and export");
+            ActivityMonitor dayMonitor = addMonitor(WorkDayActivity.class.getName(), null, false);
+            ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
+            Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
+            check(dayView != null, "A calendar day opens the day view"); waitForIdleSync();
+            await(() -> findText(dayView, "Add work period") != null, "Day view renders its candle graph and controls");
+            screenshot("smoke-day.png"); ui(dayView::finish); waitForIdleSync();
+            ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,
+                    "Schedule sub-room holds the work schedule");
+            ui(tracker::finish); waitForIdleSync();
+
             Activity custom = startActivitySync(new Intent(context, CustomThemeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             int[] colours = {0xff101010, 0xff123456, 0xffab7612, 0xffefefef};
@@ -267,6 +301,9 @@ public final class SmokeInstrumentation extends Instrumentation {
         } finally {
             context.getSystemService(NotificationManager.class).cancelAll();
             new TaskStore(context).customColours(originalCustom);
+            SharedPreferences.Editor restore = workLog.edit().clear();
+            for (var entry : originalWorkLog.entrySet()) restore.putString(entry.getKey(), (String) entry.getValue());
+            restore.commit();
             preferences.edit().putString("tasks", originalTasks).putInt("theme", originalTheme)
                     .putInt("next_id", originalNext).commit();
             Reminders.reconcile(context, false);
