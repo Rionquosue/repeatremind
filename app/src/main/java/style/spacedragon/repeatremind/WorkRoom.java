@@ -1,7 +1,6 @@
 package style.spacedragon.repeatremind;
 
 import android.app.AlertDialog;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
@@ -9,15 +8,14 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
-import android.net.Uri;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -25,13 +23,14 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /** The work tracker room: punch clock, a calendar of worked days, and the work schedule. */
 final class WorkRoom {
     static final int TRACKER = 0, DETAILS = 1, SCHEDULE = 2;
     static final String[] NAMES = {"Tracker", "Details", "Schedule"};
-    static final int EXPORT_REQUEST = 7;
     /** A day of this many hours or more gets the largest circle. */
     private static final double FULL_DAY_HOURS = 10;
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMMM uuuu");
@@ -40,7 +39,8 @@ final class WorkRoom {
     private final MainActivity a;
     private YearMonth month = YearMonth.now();
     private WorkLog log;
-    private LocalDate exportFrom, exportTo;
+    /** A job picked while not punched in; it is saved with the next punch in, not when picked. */
+    private int chosenJob;
 
     WorkRoom(MainActivity activity) { a = activity; }
 
@@ -49,6 +49,7 @@ final class WorkRoom {
 
     void render(FrameLayout body, int sub, Workdays schedule) {
         log = new WorkLogStore(a).load();
+        if (chosenJob != 0 && log.activeJobs().contains(chosenJob)) log.selected = chosenJob;
         ScrollView scroll = new ScrollView(a);
         LinearLayout content = a.column();
         content.setPadding(a.dp(20), a.dp(8), a.dp(20), a.dp(24));
@@ -64,6 +65,7 @@ final class WorkRoom {
     // ---- Tracker ----
 
     private void tracker(LinearLayout content) {
+        content.addView(jobBar(), a.spaced());
         boolean working = log.working();
         content.addView(toggle(working, "Punch out", "Punch in", () -> {
             if (log.working()) log.punchOut(now()); else log.punchIn(now(), zone());
@@ -84,13 +86,104 @@ final class WorkRoom {
         LinearLayout card = a.card(18);
         TextView title = a.text(day.equals(LocalDate.now()) ? "Today" : day.format(DAY), 19, a.palette.text);
         title.setTypeface(null, Typeface.BOLD); card.addView(title);
-        a.line(card, open != null ? "Punched in since " + Instant.ofEpochSecond(open.getValue().start).atZone(zone())
-                .format(a.timeFormat()) : "Not punched in");
+        a.line(card, open != null ? "Punched in to " + log.jobName(open.getValue().job) + " since "
+                + Instant.ofEpochSecond(open.getValue().start).atZone(zone()).format(a.timeFormat())
+                : "Not punched in · next punch in goes to " + log.jobName(log.selected));
         a.line(card, "Worked " + WorkCsv.clock(totals.worked()) + " · Break " + WorkCsv.clock(totals.breaks));
         a.line(card, "Productive " + WorkCsv.clock(totals.productive)
                 + " · Unproductive " + WorkCsv.clock(totals.unproductive()));
+        List<Integer> jobsToday = log.jobsOn(day);
+        if (jobsToday.size() > 1) {
+            for (int job : jobsToday) {
+                a.line(card, log.jobName(job) + " · worked " + WorkCsv.clock(log.totals(day, now(), job).worked()));
+            }
+        }
         content.addView(card, a.spaced());
         content.addView(a.button("View day", () -> openDay(day)));
+    }
+
+    /**
+     * The jobs to punch in to. Picking a job while punched in to another ends that work and starts this job;
+     * otherwise it only chooses the job for the next punch in.
+     */
+    private LinearLayout jobBar() {
+        LinearLayout bar = a.column();
+        HorizontalScrollView scroll = new HorizontalScrollView(a);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = new LinearLayout(a);
+        var open = log.openWork();
+        int current = open != null ? open.getValue().job : log.selected;
+        for (int job : log.activeJobs()) {
+            boolean on = job == current;
+            Button chip = a.button(log.jobName(job), () -> pickJob(job));
+            chip.setSelected(on);
+            chip.setBackground(a.background(on ? a.palette.highlight : a.palette.surface, 12, true));
+            chip.setTextColor(on ? a.palette.highlightText : a.palette.text);
+            chip.setContentDescription(log.jobName(job) + (on ? ", selected job" : ", job"));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+            params.setMarginEnd(a.dp(8));
+            row.addView(chip, params);
+        }
+        row.addView(a.button("Jobs…", this::manageJobs));
+        scroll.addView(row);
+        bar.addView(a.label("Job"));
+        bar.addView(scroll);
+        return bar;
+    }
+
+    private void pickJob(int job) {
+        chosenJob = job;
+        var open = log.openWork();
+        if (open != null && open.getValue().job != job) {
+            log.selectJob(job, now(), zone());
+            save();
+        } else {
+            log.selected = job;
+            a.rerender();
+        }
+    }
+
+    private void manageJobs() {
+        List<Integer> ids = new ArrayList<>(log.jobs.keySet());
+        String[] names = new String[ids.size() + 1];
+        for (int i = 0; i < ids.size(); i++) {
+            WorkLog.Job job = log.jobs.get(ids.get(i));
+            names[i] = job.name + (job.archived ? " (archived)" : "");
+        }
+        names[ids.size()] = "Add job";
+        new AlertDialog.Builder(a).setTitle("Jobs")
+                .setItems(names, (dialog, which) -> {
+                    if (which == ids.size()) nameJob("Add job", "", name -> { chosenJob = log.addJob(name); log.selected = chosenJob; });
+                    else jobOptions(ids.get(which));
+                }).setNegativeButton("Close", null).show();
+    }
+
+    private void jobOptions(int job) {
+        WorkLog.Job details = log.jobs.get(job);
+        boolean used = log.used(job);
+        String remove = details.archived ? "Restore" : used ? "Archive (keeps its recorded work)" : "Delete";
+        new AlertDialog.Builder(a).setTitle(details.name)
+                .setItems(new String[]{"Rename", remove}, (dialog, which) -> {
+                    try {
+                        if (which == 0) { nameJob("Rename job", details.name, name -> log.renameJob(job, name)); return; }
+                        if (details.archived) log.restoreJob(job); else log.removeJob(job);
+                        if (chosenJob == job) chosenJob = 0;
+                        save();
+                    } catch (IllegalArgumentException e) { a.message(e.getMessage()); }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    /** Asks for a job name, then applies it and saves. */
+    private void nameJob(String title, String current, java.util.function.Consumer<String> apply) {
+        EditText field = a.input("Job name", current, 60, false);
+        LinearLayout box = a.column();
+        box.setPadding(a.dp(24), a.dp(8), a.dp(24), 0);
+        box.addView(field);
+        new AlertDialog.Builder(a).setTitle(title).setView(box).setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    try { apply.accept(field.getText().toString()); save(); }
+                    catch (IllegalArgumentException e) { a.message(e.getMessage()); }
+                }).show();
     }
 
     /** A toggle highlights in the selection colour while its state is on. */
@@ -172,11 +265,22 @@ final class WorkRoom {
         if (worked > 0) {
             a.line(summary, "Productive " + WorkCsv.clock(monthProductive) + " · "
                     + (monthWorked == 0 ? 0 : Math.round(100.0 * monthProductive / monthWorked)) + "% of worked time");
+            // A line per job once more than one job has work this month.
+            java.util.TreeMap<Integer, Long> perJob = new java.util.TreeMap<>();
+            for (LocalDate date = first; !date.isAfter(month.atEndOfMonth()); date = date.plusDays(1)) {
+                for (int job : log.jobsOn(date)) perJob.merge(job, log.totals(date, now, job).worked(), Long::sum);
+            }
+            if (perJob.size() > 1) {
+                for (var entry : perJob.entrySet()) {
+                    a.line(summary, log.jobName(entry.getKey()) + " · worked " + WorkCsv.clock(entry.getValue()));
+                }
+            }
         }
         LinearLayout.LayoutParams gap = a.spaced();
         gap.topMargin = a.dp(12);
         content.addView(summary, gap);
-        content.addView(a.button("Export CSV", this::export));
+        content.addView(a.button("Export CSV", () -> a.launch(new Intent(a, ExportActivity.class)
+                .putExtra("month", month.toString()))));
     }
 
     /** A day number with a circle sized by hours worked; tapping opens the day. */
@@ -232,45 +336,14 @@ final class WorkRoom {
         a.launch(new Intent(a, WorkDayActivity.class).putExtra("date", date.toString()));
     }
 
-    // ---- CSV export ----
-
-    private void export() {
-        new AlertDialog.Builder(a).setTitle("Export CSV")
-                .setItems(new String[]{month.format(MONTH), "All recorded days"}, (dialog, which) -> {
-                    if (which == 0) { exportFrom = month.atDay(1); exportTo = month.atEndOfMonth(); }
-                    else if (log.days.isEmpty()) { a.message("No work recorded yet"); return; }
-                    else { exportFrom = log.days.firstKey(); exportTo = log.days.lastKey(); }
-                    String name = "RepeatRemind work " + (which == 0 ? month.toString() : exportFrom + " to " + exportTo) + ".csv";
-                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                            .setType("text/csv").putExtra(Intent.EXTRA_TITLE, name);
-                    try { a.startActivityForResult(intent, EXPORT_REQUEST); }
-                    catch (ActivityNotFoundException e) { a.message("No app is available to save files"); }
-                }).setNegativeButton("Cancel", null).show();
-    }
-
-    /** Writes the chosen range where the user picked; UTF-8 with a BOM so spreadsheets read it correctly. */
-    void exported(Uri uri) {
-        if (exportFrom == null || uri == null) return;
-        try (OutputStream out = a.getContentResolver().openOutputStream(uri, "wt")) {
-            if (out == null) throw new IllegalStateException("The file could not be opened");
-            out.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
-            out.write(WorkCsv.format(new WorkLogStore(a).load(), exportFrom, exportTo, now(), zone())
-                    .getBytes(StandardCharsets.UTF_8));
-            a.message("Exported work hours from " + exportFrom + " to " + exportTo);
-        } catch (Exception e) {
-            a.message("The CSV could not be saved: " + e.getMessage());
-        }
-    }
-
     void save(android.os.Bundle state) {
         state.putString("month", month.toString());
-        if (exportFrom != null) { state.putString("exportFrom", exportFrom.toString()); state.putString("exportTo", exportTo.toString()); }
+        state.putInt("chosenJob", chosenJob);
     }
 
     void restore(android.os.Bundle state) {
         month = YearMonth.parse(state.getString("month", YearMonth.now().toString()));
-        String from = state.getString("exportFrom");
-        if (from != null) { exportFrom = LocalDate.parse(from); exportTo = LocalDate.parse(state.getString("exportTo")); }
+        chosenJob = state.getInt("chosenJob", 0);
     }
 
     // ---- Schedule ----

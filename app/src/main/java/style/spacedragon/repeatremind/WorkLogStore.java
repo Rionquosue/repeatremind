@@ -5,7 +5,10 @@ import android.content.SharedPreferences;
 import java.time.LocalDate;
 import java.util.Map;
 
-/** Work log storage: one key per day, written only when a toggle or edit changes that day. */
+/**
+ * Work log storage: one key per day, plus the job list and the job new work goes to. Written in one commit, and
+ * only when a toggle or edit changes something; picking a job is saved with the next change.
+ */
 final class WorkLogStore {
     private static final String FILE = "repeatremind_worklog";
     private final SharedPreferences preferences;
@@ -17,6 +20,8 @@ final class WorkLogStore {
     WorkLog load() {
         WorkLog log = new WorkLog();
         try {
+            log.selected = preferences.getInt("job", WorkLog.FIRST_JOB);
+            log.readJobs(preferences.getString("jobs", null));
             for (Map.Entry<String, ?> entry : preferences.getAll().entrySet()) {
                 if (entry.getKey().startsWith("d") && entry.getValue() instanceof String text) {
                     log.read(LocalDate.parse(entry.getKey().substring(1)), text);
@@ -30,13 +35,17 @@ final class WorkLogStore {
     }
 
     void save(WorkLog log) {
-        if (log.dirty.isEmpty()) return;
+        boolean selectionChanged = preferences.getInt("job", WorkLog.FIRST_JOB) != log.selected;
+        if (log.dirty.isEmpty() && !log.jobsDirty && !selectionChanged) return;
         SharedPreferences.Editor edit = preferences.edit();
+        if (log.jobsDirty) edit.putString("jobs", log.jobsText());
+        if (selectionChanged) edit.putInt("job", log.selected);
         for (LocalDate day : log.dirty) {
             var periods = log.periods(day);
             if (periods.isEmpty()) edit.remove("d" + day); else edit.putString("d" + day, WorkLog.text(periods));
         }
         if (!edit.commit()) throw new IllegalStateException("Work hours could not be saved");
         log.dirty.clear();
+        log.jobsDirty = false;
     }
 }

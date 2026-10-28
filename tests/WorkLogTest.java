@@ -19,6 +19,7 @@ public final class WorkLogTest {
         overnight();
         storage();
         csv();
+        jobs();
         System.out.println("PASS: " + assertions + " work log assertions");
     }
 
@@ -151,13 +152,89 @@ public final class WorkLogTest {
         log.days.put(DAY.plusDays(2), new java.util.ArrayList<>(List.of(
                 new WorkLog.Period(WorkLog.Kind.WORK, Instant.parse("2026-10-30T22:00:00Z").getEpochSecond(), WorkLog.OPEN))));
         long now = Instant.parse("2026-10-31T01:30:00Z").getEpochSecond();
-        String[] rows = WorkCsv.format(log, DAY, DAY.plusDays(2), now, UTC).split("\r\n");
-        check(rows.length == 3 && rows[0].equals(WorkCsv.HEADER), "Header and one row per worked day");
-        check(rows[1].equals("2026-10-28,Wednesday,2026-10-28 09:00,2026-10-28 17:00,8.00,1.00,7.00,2.00,5.00,29,1"),
+        String[] rows = WorkCsv.daily(log, DAY, DAY.plusDays(2), WorkLog.ALL_JOBS, now, UTC).split("\r\n");
+        check(rows.length == 3 && rows[0].equals(WorkCsv.DAILY_HEADER), "Header and one row per worked day");
+        check(rows[1].equals("2026-10-28,Wednesday,Main job,2026-10-28 09:00,2026-10-28 17:00,8.00,1.00,7.00,2.00,5.00,29,7:00,1"),
                 "Day row: " + rows[1]);
-        check(rows[2].equals("2026-10-30,Friday,2026-10-30 22:00,,3.50,0.00,3.50,0.00,3.50,0,1"), "Running row: " + rows[2]);
-        check(WorkCsv.format(log, DAY.plusDays(5), DAY.plusDays(6), now, UTC).equals(WorkCsv.HEADER + "\r\n"), "Empty range");
+        check(rows[2].equals("2026-10-30,Friday,Main job,2026-10-30 22:00,,3.50,0.00,3.50,0.00,3.50,0,3:30,1"),
+                "Running row: " + rows[2]);
+        check(WorkCsv.daily(log, DAY.plusDays(5), DAY.plusDays(6), WorkLog.ALL_JOBS, now, UTC)
+                .equals(WorkCsv.DAILY_HEADER + "\r\n"), "Empty range");
         check(WorkCsv.clock(minutes(450)).equals("7:30") && WorkCsv.clock(hours(26)).equals("26:00"), "Display clock");
+
+        String[] periods = WorkCsv.periods(log, DAY, DAY.plusDays(2), WorkLog.ALL_JOBS, now, UTC).split("\r\n");
+        check(periods.length == 5 && periods[0].equals(WorkCsv.PERIODS_HEADER), "One row per period");
+        check(periods[1].equals("2026-10-28,Wednesday,Main job,Work,2026-10-28 09:00,2026-10-28 17:00,480,8.00"), periods[1]);
+        check(periods[2].equals("2026-10-28,Wednesday,Main job,Productive,2026-10-28 09:30,2026-10-28 11:30,120,2.00"), periods[2]);
+        check(periods[3].equals("2026-10-28,Wednesday,Main job,Break,2026-10-28 12:00,2026-10-28 13:00,60,1.00"), periods[3]);
+        check(periods[4].equals("2026-10-30,Friday,Main job,Work,2026-10-30 22:00,,210,3.50"), periods[4]);
+
+        check(WorkCsv.cell("Cafe").equals("Cafe") && WorkCsv.cell("Bar, grill").equals("\"Bar, grill\"")
+                && WorkCsv.cell("Say \"hi\"").equals("\"Say \"\"hi\"\"\"") && WorkCsv.cell("=SUM(A1)").equals("'=SUM(A1)")
+                && WorkCsv.cell("-shift").equals("'-shift"), "Text cells are quoted and formula-safe");
+    }
+
+    private static void jobs() {
+        WorkLog log = new WorkLog();
+        check(log.activeJobs().equals(List.of(WorkLog.FIRST_JOB)) && log.jobName(1).equals("Main job"), "Starts with one job");
+        int cafe = log.addJob("  Cafe,   evenings ");
+        check(log.jobName(cafe).equals("Cafe, evenings") && log.jobsDirty, "Names are tidied; jobs marked for saving");
+        try { log.addJob("  "); throw new AssertionError("Accepted a blank name"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        // Punching in uses the selected job; picking another job while punched in switches work at that moment.
+        log.selected = cafe;
+        log.punchIn(at("09:00"), UTC);
+        log.start(WorkLog.Kind.PRODUCTIVE, at("09:30"), UTC);
+        log.selectJob(WorkLog.FIRST_JOB, at("12:00"), UTC);
+        List<WorkLog.Period> work = log.work(DAY);
+        check(work.size() == 2 && work.get(0).job == cafe && work.get(0).end == at("12:00")
+                && work.get(1).job == WorkLog.FIRST_JOB && work.get(1).open(), "Switching jobs splits the work");
+        check(!log.running(WorkLog.Kind.PRODUCTIVE), "Switching jobs ends productive time");
+        log.selectJob(WorkLog.FIRST_JOB, at("12:30"), UTC);
+        check(log.work(DAY).size() == 2, "Picking the current job changes nothing");
+        log.start(WorkLog.Kind.BREAK, at("13:00"), UTC);
+        log.punchOut(at("17:00"));
+        check(log.totals(DAY, 0, cafe).punched == hours(3) && log.totals(DAY, 0, cafe).productive == minutes(150),
+                "Totals by job: own work and productive time");
+        check(log.totals(DAY, 0, WorkLog.FIRST_JOB).punched == hours(5) && log.totals(DAY, 0, WorkLog.FIRST_JOB).breaks == hours(4),
+                "Break time counts toward its work period's job");
+        check(log.totals(DAY, 0).punched == hours(8), "All-job totals");
+        check(log.jobsOn(DAY).equals(List.of(WorkLog.FIRST_JOB, cafe)), "Jobs worked on a day");
+        String[] rows = WorkCsv.daily(log, DAY, DAY, WorkLog.ALL_JOBS, 0, UTC).split("\r\n");
+        check(rows.length == 3 && rows[1].contains(",Main job,") && rows[2].contains(",\"Cafe, evenings\","), "A row per job");
+        check(WorkCsv.daily(log, DAY, DAY, cafe, 0, UTC).split("\r\n").length == 2, "Export filtered to one job");
+        check(WorkCsv.periods(log, DAY, DAY, cafe, 0, UTC).split("\r\n").length == 3, "Periods filtered to one job");
+        // Storage keeps the job of each work period; the first job needs no marker.
+        String text = WorkLog.text(log.periods(DAY));
+        check(text.contains("@" + cafe) && !text.contains("@" + WorkLog.FIRST_JOB), "Job marker on work periods");
+        WorkLog copy = new WorkLog();
+        copy.readJobs(log.jobsText());
+        copy.read(DAY, text);
+        check(copy.jobName(cafe).equals("Cafe, evenings") && copy.work(DAY).get(0).job == cafe
+                && copy.work(DAY).get(1).job == WorkLog.FIRST_JOB, "Jobs and markers round-trip");
+        WorkLog legacy = new WorkLog();
+        legacy.read(DAY, "W" + at("09:00") + "-" + at("17:00"));
+        check(legacy.work(DAY).get(0).job == WorkLog.FIRST_JOB, "Work saved before jobs belongs to the first job");
+        // A used job is archived, keeping its name; an unused one is deleted; the last active job stays.
+        log.removeJob(cafe);
+        check(log.jobs.get(cafe).archived && log.jobName(cafe).equals("Cafe, evenings") && !log.activeJobs().contains(cafe),
+                "Used job is archived");
+        int unused = log.addJob("Spare");
+        log.removeJob(unused);
+        check(!log.jobs.containsKey(unused), "Unused job is deleted");
+        try { log.removeJob(WorkLog.FIRST_JOB); throw new AssertionError("Removed the last active job"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        log.restoreJob(cafe);
+        check(log.activeJobs().contains(cafe), "Archived job can be restored");
+        log.renameJob(cafe, "Cafe");
+        check(log.jobName(cafe).equals("Cafe"), "Rename");
+        log.selected = cafe;
+        log.punchIn(at("18:00"), UTC);
+        try { log.removeJob(cafe); throw new AssertionError("Removed the job being worked"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        WorkLog.Period added = log.addWork(DAY.plusDays(1), 0, UTC, WorkLog.FIRST_JOB);
+        log.setJob(DAY.plusDays(1), added, cafe);
+        check(added.job == cafe && log.dirty.contains(DAY.plusDays(1)), "Changing a work period's job");
     }
 
     /** 9:00–17:00 work with productive 9:30–11:30 and lunch 12:00–13:00. */

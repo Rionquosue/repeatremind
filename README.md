@@ -51,6 +51,11 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   starting either one punches you in, and punching out stops everything. Today's worked, productive,
   unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
   nothing is written on a timer. A shift past midnight stays on the day it started.
+- **Jobs:** the row above the toggles holds your jobs. Tap one to choose where the next punch in goes;
+  tapping another job while punched in ends that work and starts the new job at the same moment.
+  **Jobs…** adds or renames jobs. A job with no recorded work is deleted; one with work is archived,
+  so its history and exports keep its name, and can be restored. Productive and break time count toward
+  the job of the work period they fall in. Choosing a job writes nothing until the next punch in.
 - **Work tracker → Details** is a calendar: each worked day has a circle that grows with the hours
   worked. Tap a day for its candle graph: work periods in the first column; productive, unproductive
   and break time in the second. Drag the round handles at the start and end of a period to move it in
@@ -58,11 +63,16 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   overlap, and productive and break time stay inside their work period. The list below the graph does
   the same with buttons, and can add or delete periods. Worked time excludes breaks; unproductive time is
   worked time that was not productive.
-- **Export CSV** (in Details) saves the month shown, or every recorded day, wherever you choose. It has
-  one row per day: date, weekday, first in, last out, punched, break, worked, productive and
-  unproductive hours (decimal), productive percentage, and the number of work periods. The file is UTF-8
-  with a byte-order mark, so spreadsheets read it directly. Choosing the location uses Android's own
-  file picker and needs no storage permission.
+- **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage
+  permission). Choose the dates (the month shown, all recorded days, or a range), one job or all, and a format:
+  - **Daily summary:** one row per day and job: date, weekday, job, first in, last out, punched, break,
+    worked, productive and unproductive hours (decimal), productive %, worked as h:mm, and work periods.
+  - **Every period:** one row per work, productive or break period: date, weekday, job, type, start, end,
+    minutes and hours.
+
+  The file is UTF-8 with a byte-order mark; job names are quoted when needed and never read as formulas.
+  The export screen lists recommended import settings: UTF-8, comma separator, double-quote text
+  delimiter, header row, ISO dates (`YYYY-MM-DD`, times `YYYY-MM-DD HH:MM`), and a dot as the decimal mark.
 - **Work tracker → Schedule** sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
   select the days you work, or **shift work** (e.g. retail) and enter start and end times for each day;
   days without times are off. It prompts you when no shifts are entered for the next 7 days.
@@ -134,7 +144,8 @@ and readable label contrast over a grid of sRGB colours. `ScheduleTest` checks s
 validation, list labels, and the date-level recurrence helpers. `WorkdaysTest` checks shift and
 break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
 one delivery per shift, and workday labels. `WorkLogTest` checks the punch clock toggles, totals,
-editing limits and 5-minute snapping, adding and deleting periods, night shifts, storage and the CSV. `ReminderStateTest` also covers temporary tasks,
+editing limits and 5-minute snapping, adding and deleting periods, night shifts, jobs (switching, totals
+by job, archiving, storage), and both CSV formats including quoting. `ReminderStateTest` also covers temporary tasks,
 wake-up selection, late completion, clock changes and compact history storage.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
 buttons, weekday highlights, missed-history filtering, the work tracker toggles, calendar and day view,

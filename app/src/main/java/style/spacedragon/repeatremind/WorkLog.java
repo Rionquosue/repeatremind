@@ -26,12 +26,27 @@ final class WorkLog {
     static final long STEP = 5 * 60;
     static final long MIN_LENGTH = 60;
     private static final long DAY = 24 * 60 * 60;
+    /** Work recorded before jobs existed belongs to this job. */
+    static final int FIRST_JOB = 1;
+    static final int ALL_JOBS = 0;
+
+    static final class Job {
+        String name;
+        /** Hidden from the tracker; kept so recorded work still shows its name. */
+        boolean archived;
+
+        Job(String name, boolean archived) { this.name = name; this.archived = archived; }
+    }
 
     static final class Period {
         final Kind kind;
         long start, end;
+        /** The job of a work period; productive and break periods belong to their work period's job. */
+        int job = FIRST_JOB;
 
         Period(Kind kind, long start, long end) { this.kind = kind; this.start = start; this.end = end; }
+
+        Period(Kind kind, long start, long end, int job) { this(kind, start, end); this.job = job; }
 
         boolean open() { return end == OPEN; }
 
@@ -53,6 +68,100 @@ final class WorkLog {
     final TreeMap<LocalDate, List<Period>> days = new TreeMap<>();
     /** Days changed since the last save, so storage rewrites only those. */
     final Set<LocalDate> dirty = new TreeSet<>();
+    final TreeMap<Integer, Job> jobs = new TreeMap<>();
+    boolean jobsDirty;
+    /** The job new work goes to; saved with the next punch in rather than when it is picked. */
+    int selected = FIRST_JOB;
+
+    WorkLog() { jobs.put(FIRST_JOB, new Job("Main job", false)); }
+
+    // ---- Jobs ----
+
+    String jobName(int job) {
+        Job found = jobs.get(job);
+        return found == null ? "Job " + job : found.name;
+    }
+
+    /** Jobs shown in the tracker, in the order they were added. */
+    List<Integer> activeJobs() {
+        List<Integer> active = new ArrayList<>();
+        for (var entry : jobs.entrySet()) if (!entry.getValue().archived) active.add(entry.getKey());
+        return active;
+    }
+
+    int addJob(String name) {
+        int id = jobs.lastKey() + 1;
+        jobs.put(id, new Job(checkName(name), false));
+        jobsDirty = true;
+        return id;
+    }
+
+    void renameJob(int job, String name) {
+        jobs.get(job).name = checkName(name);
+        jobsDirty = true;
+    }
+
+    boolean used(int job) {
+        for (List<Period> periods : days.values()) {
+            for (Period period : periods) if (period.kind == Kind.WORK && period.job == job) return true;
+        }
+        return false;
+    }
+
+    /** Deletes a job with no recorded work; a job with work is archived instead, so its history keeps its name. */
+    void removeJob(int job) {
+        if (activeJobs().size() <= 1 && !jobs.get(job).archived) throw new IllegalArgumentException("Keep at least one job");
+        var open = openWork();
+        if (open != null && open.getValue().job == job) throw new IllegalArgumentException("Punch out of this job first");
+        if (used(job)) jobs.get(job).archived = true; else jobs.remove(job);
+        if (selected == job) selected = activeJobs().get(0);
+        jobsDirty = true;
+    }
+
+    void restoreJob(int job) {
+        jobs.get(job).archived = false;
+        jobsDirty = true;
+    }
+
+    private static String checkName(String name) {
+        String trimmed = name == null ? "" : name.trim().replaceAll("\\s+", " ");
+        if (trimmed.isEmpty()) throw new IllegalArgumentException("Enter a job name");
+        if (trimmed.length() > 60) throw new IllegalArgumentException("Use 60 characters or fewer");
+        return trimmed;
+    }
+
+    /** Picks the job for new work; while punched in to another job, ends that work and starts this one. */
+    void selectJob(int job, long now, ZoneId zone) {
+        if (!jobs.containsKey(job)) return;
+        selected = job;
+        var open = openWork();
+        if (open != null && open.getValue().job != job) {
+            punchOut(now);
+            punchIn(now, zone);
+        }
+    }
+
+    /** One job per line: id, archived flag (0 or 1) and name, separated by '|'. */
+    String jobsText() {
+        StringBuilder text = new StringBuilder();
+        for (var entry : jobs.entrySet()) {
+            if (text.length() > 0) text.append('\n');
+            text.append(entry.getKey()).append('|').append(entry.getValue().archived ? 1 : 0).append('|')
+                    .append(entry.getValue().name);
+        }
+        return text.toString();
+    }
+
+    void readJobs(String text) {
+        if (text == null || text.isEmpty()) return;
+        jobs.clear();
+        for (String line : text.split("\n")) {
+            String[] parts = line.split("\\|", 3);
+            jobs.put(Integer.parseInt(parts[0]), new Job(parts[2], parts[1].equals("1")));
+        }
+        if (jobs.isEmpty()) jobs.put(FIRST_JOB, new Job("Main job", false));
+        if (!jobs.containsKey(selected) || jobs.get(selected).archived) selected = activeJobs().isEmpty() ? jobs.firstKey() : activeJobs().get(0);
+    }
 
     // ---- Punch clock ----
 
@@ -77,10 +186,11 @@ final class WorkLog {
         return false;
     }
 
+    /** Punches in to the selected job. */
     void punchIn(long now, ZoneId zone) {
         if (working()) return;
         LocalDate day = date(now, zone);
-        add(day, new Period(Kind.WORK, now, OPEN));
+        add(day, new Period(Kind.WORK, now, OPEN, selected));
     }
 
     /** Ends the running work period and anything running inside it. */
@@ -119,9 +229,13 @@ final class WorkLog {
 
     // ---- Queries ----
 
-    Totals totals(LocalDate day, long now) {
+    Totals totals(LocalDate day, long now) { return totals(day, now, ALL_JOBS); }
+
+    /** Totals for one job, or for all jobs with ALL_JOBS. */
+    Totals totals(LocalDate day, long now, int job) {
         Totals totals = new Totals();
         for (Period period : days.getOrDefault(day, Collections.emptyList())) {
+            if (job != ALL_JOBS && jobOf(day, period, now) != job) continue;
             long length = period.length(now);
             switch (period.kind) {
                 case WORK -> totals.punched += length;
@@ -130,6 +244,20 @@ final class WorkLog {
             }
         }
         return totals;
+    }
+
+    /** The job a period counts toward: its own for work, its work period's for productive and break time. */
+    int jobOf(LocalDate day, Period period, long now) {
+        if (period.kind == Kind.WORK) return period.job;
+        Period parent = parent(day, period, now);
+        return parent == null ? FIRST_JOB : parent.job;
+    }
+
+    /** Jobs with work on this day, in job order. */
+    List<Integer> jobsOn(LocalDate day) {
+        TreeSet<Integer> on = new TreeSet<>();
+        for (Period period : work(day)) on.add(period.job);
+        return new ArrayList<>(on);
     }
 
     List<Period> periods(LocalDate day) { return days.getOrDefault(day, Collections.emptyList()); }
@@ -221,8 +349,16 @@ final class WorkLog {
         dirty.add(day);
     }
 
+    void setJob(LocalDate day, Period work, int job) {
+        if (work.kind != Kind.WORK || !jobs.containsKey(job)) return;
+        work.job = job;
+        dirty.add(day);
+    }
+
+    Period addWork(LocalDate day, long now, ZoneId zone) { return addWork(day, now, zone, selected); }
+
     /** Adds a finished work period: 9:00–17:00 on an empty day, else an hour after the last one. */
-    Period addWork(LocalDate day, long now, ZoneId zone) {
+    Period addWork(LocalDate day, long now, ZoneId zone, int job) {
         List<Period> work = work(day);
         long start, end;
         if (work.isEmpty()) {
@@ -235,7 +371,7 @@ final class WorkLog {
             end = start + 3600;
             if (start >= dayStart(day, zone) + DAY) throw new IllegalArgumentException("This day has no room for another work period");
         }
-        Period period = new Period(Kind.WORK, start, end);
+        Period period = new Period(Kind.WORK, start, end, job);
         add(day, period);
         return period;
     }
@@ -260,12 +396,16 @@ final class WorkLog {
 
     // ---- Storage form ----
 
-    /** One day as text: kind letter, start and end seconds; e.g. "W1730000000-1730028800,P1730001000-1730004600". */
+    /**
+     * One day as text: kind letter, start and end seconds, and "@job" on work periods of jobs other than the first;
+     * e.g. "W1730000000-1730028800@2,P1730001000-1730004600".
+     */
     static String text(List<Period> periods) {
         StringBuilder text = new StringBuilder();
         for (Period period : periods) {
             if (text.length() > 0) text.append(',');
             text.append(period.kind.name().charAt(0)).append(period.start).append('-').append(period.end);
+            if (period.kind == Kind.WORK && period.job != FIRST_JOB) text.append('@').append(period.job);
         }
         return text.toString();
     }
@@ -280,8 +420,10 @@ final class WorkLog {
                 case 'B' -> Kind.BREAK;
                 default -> throw new IllegalArgumentException("Unknown period: " + part);
             };
-            int dash = part.indexOf('-', 1);
-            periods.add(new Period(kind, Long.parseLong(part.substring(1, dash)), Long.parseLong(part.substring(dash + 1))));
+            int dash = part.indexOf('-', 1), at = part.indexOf('@');
+            long end = Long.parseLong(part.substring(dash + 1, at < 0 ? part.length() : at));
+            int job = at < 0 ? FIRST_JOB : Integer.parseInt(part.substring(at + 1));
+            periods.add(new Period(kind, Long.parseLong(part.substring(1, dash)), end, job));
         }
         periods.sort(ORDER);
         if (!periods.isEmpty()) days.put(day, periods);

@@ -113,7 +113,7 @@ public final class WorkDayActivity extends BaseActivity {
         rows.removeAllViews();
         for (WorkLog.Period period : log.periods(day)) {
             boolean child = period.kind != WorkLog.Kind.WORK;
-            Button row = button(name(period) + " · " + range(period, now)
+            Button row = button(name(period) + (child ? "" : " · " + log.jobName(period.job)) + " · " + range(period, now)
                     + " (" + WorkCsv.clock(period.length(now)) + ")", () -> options(period));
             row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
             row.setBackground(background(child ? palette.surface : palette.button, 12, child));
@@ -147,12 +147,16 @@ public final class WorkDayActivity extends BaseActivity {
     private void options(WorkLog.Period period) {
         List<String> items = new ArrayList<>(java.util.Collections.singletonList("Change start"));
         if (!period.open()) items.add("Change end");
+        if (period.kind == WorkLog.Kind.WORK && log.jobs.size() > 1) items.add("Change job");
         items.add("Delete");
         new AlertDialog.Builder(this).setTitle(name(period) + " · " + range(period, now()))
                 .setItems(items.toArray(new String[0]), (dialog, which) -> {
                     String item = items.get(which);
                     if (item.equals("Change start")) pickTime(period, true);
                     else if (item.equals("Change end")) pickTime(period, false);
+                    else if (item.equals("Change job")) pickJob("Job for this work", period.job, job -> {
+                        log.setJob(day, period, job); save();
+                    });
                     else confirmDelete(period);
                 }).setNegativeButton("Cancel", null).show();
     }
@@ -182,8 +186,23 @@ public final class WorkDayActivity extends BaseActivity {
     }
 
     private void addWork() {
-        try { log.addWork(day, now(), zone()); save(); }
-        catch (IllegalArgumentException e) { message(e.getMessage()); }
+        pickJob("Add work for which job?", WorkLog.ALL_JOBS, job -> {
+            try { log.addWork(day, now(), zone(), job); save(); }
+            catch (IllegalArgumentException e) { message(e.getMessage()); }
+        });
+    }
+
+    /** Asks which active job to use, or uses the only one without asking. */
+    private void pickJob(String title, int current, java.util.function.IntConsumer picked) {
+        List<Integer> jobs = log.activeJobs();
+        if (jobs.size() == 1 && current == WorkLog.ALL_JOBS) { picked.accept(jobs.get(0)); return; }
+        String[] names = new String[jobs.size()];
+        for (int i = 0; i < names.length; i++) names[i] = log.jobName(jobs.get(i));
+        new AlertDialog.Builder(this).setTitle(title)
+                .setSingleChoiceItems(names, jobs.indexOf(current), (dialog, which) -> {
+                    dialog.dismiss();
+                    picked.accept(jobs.get(which));
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private void addInside(WorkLog.Kind kind) {
@@ -224,7 +243,7 @@ public final class WorkDayActivity extends BaseActivity {
      */
     private final class Candle extends View {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
-                label = new Paint(Paint.ANTI_ALIAS_FLAG);
+                label = new Paint(Paint.ANTI_ALIAS_FLAG), jobLabel = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final List<Handle> handles = new ArrayList<>();
         private final List<RectF> bars = new ArrayList<>();
         private final List<WorkLog.Period> barPeriods = new ArrayList<>();
@@ -332,6 +351,15 @@ public final class WorkDayActivity extends BaseActivity {
                 int shade = shades.getOrDefault(period, 0);
                 stroke.setColor(outline(shade)); stroke.setStrokeWidth(dp(shade == 0 ? 1 : 2));
                 canvas.drawRoundRect(bars.get(i), radius, radius, stroke);
+                // Work candles carry their job's name when there is more than one job and room for it.
+                if (period.kind == WorkLog.Kind.WORK && log.jobs.size() > 1 && bars.get(i).height() > dp(40)) {
+                    jobLabel.setColor(palette.buttonText);
+                    jobLabel.setTextSize(dp(11));
+                    jobLabel.setTextAlign(Paint.Align.CENTER);
+                    String name = android.text.TextUtils.ellipsize(log.jobName(period.job), new android.text.TextPaint(jobLabel),
+                            bars.get(i).width() - dp(8), android.text.TextUtils.TruncateAt.END).toString();
+                    canvas.drawText(name, bars.get(i).centerX(), bars.get(i).top + dp(26), jobLabel);
+                }
             }
             if (log.periods(day).stream().anyMatch(WorkLog.Period::open) && now >= rangeStart && now <= rangeEnd) {
                 stroke.setColor(palette.text); stroke.setStrokeWidth(dp(1.5f));

@@ -375,11 +375,6 @@ public final class MainActivity extends BaseActivity {
         work.save(state);
     }
 
-    @Override protected void onActivityResult(int request, int result, Intent intent) {
-        super.onActivityResult(request, result, intent);
-        if (request == WorkRoom.EXPORT_REQUEST && result == RESULT_OK && intent != null) work.exported(intent.getData());
-    }
-
     private void requestNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED

@@ -246,7 +246,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             Activity tracker = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             ui(() -> findText(tracker, "Work tracker").performClick()); waitForIdleSync();
-            await(() -> findText(tracker, "Punch in") != null, "Work tracker room shows the punch clock");
+            await(() -> findText(tracker, "Punch in") != null && findText(tracker, "Main job") != null
+                    && findText(tracker, "Main job").isSelected(), "Work tracker room shows the punch clock and job");
             ui(() -> findText(tracker, "Start productive").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Stop productive") != null && findText(tracker, "Punch out") != null,
                     "Starting productive time punches in");
@@ -262,6 +263,13 @@ public final class SmokeInstrumentation extends Instrumentation {
                     && !new WorkLogStore(context).load().working(), "Punching out stops everything");
             ui(() -> findText(tracker, "Details").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Export CSV") != null, "Details shows the calendar and export");
+            ActivityMonitor exportMonitor = addMonitor(ExportActivity.class.getName(), null, false);
+            ui(() -> findText(tracker, "Export CSV").performClick());
+            Activity export = waitForMonitorWithTimeout(exportMonitor, 15000); removeMonitor(exportMonitor);
+            check(export != null, "Export CSV opens the export screen"); waitForIdleSync();
+            await(() -> findText(export, "Recommended import settings") != null && findText(export, "Save CSV") != null,
+                    "Export screen shows its options and import settings");
+            screenshot("smoke-export.png"); ui(export::finish); waitForIdleSync();
             ActivityMonitor dayMonitor = addMonitor(WorkDayActivity.class.getName(), null, false);
             ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
             Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
