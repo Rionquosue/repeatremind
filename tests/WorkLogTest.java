@@ -9,6 +9,7 @@ import java.util.List;
 public final class WorkLogTest {
     private static final ZoneId UTC = ZoneId.of("UTC");
     private static final LocalDate DAY = LocalDate.of(2026, 10, 28);
+    private static final int J = WorkLog.FIRST_JOB;
     private static int assertions;
 
     public static void main(String[] args) {
@@ -25,43 +26,45 @@ public final class WorkLogTest {
 
     private static void punchClock() {
         WorkLog log = new WorkLog();
-        check(!log.working() && !log.running(WorkLog.Kind.PRODUCTIVE), "Starts stopped");
-        log.punchIn(at("09:00"), UTC);
-        log.punchIn(at("09:05"), UTC);
-        check(log.working() && log.work(DAY).size() == 1, "Punching in twice keeps one work period");
-        log.start(WorkLog.Kind.PRODUCTIVE, at("09:10"), UTC);
-        check(log.running(WorkLog.Kind.PRODUCTIVE), "Productive running");
-        log.start(WorkLog.Kind.BREAK, at("10:00"), UTC);
-        check(log.running(WorkLog.Kind.BREAK) && !log.running(WorkLog.Kind.PRODUCTIVE), "Break stops productive");
-        log.start(WorkLog.Kind.PRODUCTIVE, at("10:30"), UTC);
-        check(log.running(WorkLog.Kind.PRODUCTIVE) && !log.running(WorkLog.Kind.BREAK), "Productive stops break");
-        log.stop(WorkLog.Kind.PRODUCTIVE, at("11:00"));
-        check(!log.running(WorkLog.Kind.PRODUCTIVE) && log.working(), "Stop productive keeps working");
-        log.start(WorkLog.Kind.BREAK, at("12:00"), UTC);
-        log.punchOut(at("12:30"));
-        check(!log.working() && !log.running(WorkLog.Kind.BREAK), "Punch out ends everything");
+        check(!log.working() && !log.running(WorkLog.Kind.PRODUCTIVE, J), "Starts stopped");
+        check(log.canStart(WorkLog.Kind.WORK, J) && !log.canStart(WorkLog.Kind.PRODUCTIVE, J)
+                && !log.canStart(WorkLog.Kind.BREAK, J), "Only punch in is available");
+        try { log.start(WorkLog.Kind.PRODUCTIVE, J, at("08:55")); throw new AssertionError("Started productive without punching in"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        check(!log.working(), "Starting productive never punches in for you");
+        log.punchIn(J, at("09:00"), UTC);
+        log.punchIn(J, at("09:05"), UTC);
+        check(log.working(J) && log.work(DAY).size() == 1, "Punching in twice keeps one work period");
+        log.start(WorkLog.Kind.PRODUCTIVE, J, at("09:10"));
+        check(log.running(WorkLog.Kind.PRODUCTIVE, J) && !log.canStart(WorkLog.Kind.BREAK, J), "Productive running; break unavailable");
+        try { log.start(WorkLog.Kind.BREAK, J, at("10:00")); throw new AssertionError("A break stopped productive time"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        check(log.running(WorkLog.Kind.PRODUCTIVE, J) && !log.running(WorkLog.Kind.BREAK, J), "Nothing toggled for you");
+        log.stop(WorkLog.Kind.PRODUCTIVE, J, at("10:00"));
+        log.start(WorkLog.Kind.BREAK, J, at("10:00"));
+        check(log.running(WorkLog.Kind.BREAK, J) && !log.canStart(WorkLog.Kind.PRODUCTIVE, J), "Break running; productive unavailable");
+        log.stop(WorkLog.Kind.BREAK, J, at("10:30"));
+        check(!log.running(WorkLog.Kind.BREAK, J) && log.working(J), "Stopping a break keeps working");
+        log.start(WorkLog.Kind.BREAK, J, at("12:00"));
+        log.punchOut(J, at("12:30"));
+        check(!log.working() && !log.running(WorkLog.Kind.BREAK, J), "Punch out ends that job's break");
         check(log.periods(DAY).stream().noneMatch(WorkLog.Period::open), "No period left running");
         check(log.dirty.contains(DAY), "Changed day is marked for saving");
-
-        log = new WorkLog();
-        log.start(WorkLog.Kind.PRODUCTIVE, at("08:00"), UTC);
-        check(log.working() && log.running(WorkLog.Kind.PRODUCTIVE), "Starting productive punches in");
-        log.stop(WorkLog.Kind.BREAK, at("08:30"));
-        log.punchOut(at("09:00"));
-        log.punchOut(at("09:30"));
-        check(log.work(DAY).get(0).end == at("09:00"), "Punching out twice changes nothing");
+        log.punchOut(J, at("13:00"));
+        check(log.work(DAY).get(0).end == at("12:30"), "Punching out twice changes nothing");
     }
 
     private static void totals() {
         WorkLog log = new WorkLog();
-        log.punchIn(at("09:00"), UTC);
-        log.start(WorkLog.Kind.PRODUCTIVE, at("09:00"), UTC);
-        log.start(WorkLog.Kind.BREAK, at("12:00"), UTC);
-        log.stop(WorkLog.Kind.BREAK, at("12:30"));
+        log.punchIn(J, at("09:00"), UTC);
+        log.start(WorkLog.Kind.PRODUCTIVE, J, at("09:00"));
+        log.stop(WorkLog.Kind.PRODUCTIVE, J, at("12:00"));
+        log.start(WorkLog.Kind.BREAK, J, at("12:00"));
+        log.stop(WorkLog.Kind.BREAK, J, at("12:30"));
         WorkLog.Totals open = log.totals(DAY, at("13:00"));
         check(open.punched == hours(4) && open.breaks == minutes(30) && open.productive == hours(3)
                 && open.worked() == minutes(210) && open.unproductive() == minutes(30), "Running totals count up to now");
-        log.punchOut(at("17:00"));
+        log.punchOut(J, at("17:00"));
         WorkLog.Totals day = log.totals(DAY, at("20:00"));
         check(day.punched == hours(8) && day.worked() == minutes(450) && day.unproductive() == minutes(270),
                 "Closed totals stop at punch out");
@@ -72,8 +75,8 @@ public final class WorkLogTest {
         check(WorkLog.snap(at("09:02")) == at("09:00") && WorkLog.snap(at("09:03")) == at("09:05"), "Snaps to five minutes");
         WorkLog log = sample();
         WorkLog.Period work = log.work(DAY).get(0);
-        WorkLog.Period productive = log.children(DAY, work, 0).get(0);
-        WorkLog.Period lunch = log.children(DAY, work, 0).get(1);
+        WorkLog.Period productive = log.children(DAY, work).get(0);
+        WorkLog.Period lunch = log.children(DAY, work).get(1);
         // Work cannot shrink past what it contains, or move into the previous day.
         check(log.clamp(DAY, work, true, at("11:00"), 0, UTC) == at("09:30"), "Work start stops at its first child");
         check(log.clamp(DAY, work, true, LocalDate.of(2026, 10, 27).atStartOfDay(UTC).toEpochSecond(), 0, UTC)
@@ -90,26 +93,26 @@ public final class WorkLogTest {
         check(log.move(DAY, productive, false, at("11:00"), 0, UTC) == at("11:00") && productive.end == at("11:00")
                 && log.dirty.contains(DAY), "Move applies and marks the day");
         // A second work period blocks the first from growing into it.
-        WorkLog.Period evening = log.addWork(DAY, 0, UTC);
+        WorkLog.Period evening = log.addWork(DAY, 0, UTC, J);
         check(evening.start == at("17:00") && evening.end == at("18:00"), "Next work starts where the last ended");
         check(log.clamp(DAY, work, false, at("19:00"), 0, UTC) == at("17:00"), "Work periods never overlap");
         check(log.clamp(DAY, evening, true, at("16:00"), 0, UTC) == at("17:00"), "Later work cannot move into earlier");
         // A running end is fixed; its start can move up to a minute before now.
         WorkLog running = new WorkLog();
-        running.punchIn(at("09:00"), UTC);
+        running.punchIn(J, at("09:00"), UTC);
         WorkLog.Period open = running.work(DAY).get(0);
         check(running.clamp(DAY, open, false, at("08:00"), at("10:00"), UTC) == WorkLog.OPEN, "Running end is fixed");
         check(running.clamp(DAY, open, true, at("11:00"), at("10:00"), UTC) == at("09:59"), "Running start stays before now");
         // Removing work removes its children.
-        log.remove(DAY, work, 0);
+        log.remove(DAY, work);
         check(log.work(DAY).size() == 1 && log.periods(DAY).size() == 1, "Removing work removes its children");
-        log.remove(DAY, evening, 0);
+        log.remove(DAY, evening);
         check(!log.days.containsKey(DAY) && log.periods(DAY).isEmpty(), "An emptied day is dropped");
     }
 
     private static void adding() {
         WorkLog log = new WorkLog();
-        WorkLog.Period work = log.addWork(DAY, 0, UTC);
+        WorkLog.Period work = log.addWork(DAY, 0, UTC, J);
         check(work.start == at("09:00") && work.end == at("17:00"), "First work period defaults to 9 to 5");
         WorkLog.Period productive = log.addInside(DAY, work, WorkLog.Kind.PRODUCTIVE, 0);
         check(productive.start == at("09:00") && productive.end == at("10:00"), "Child fills the largest gap, up to an hour");
@@ -119,23 +122,23 @@ public final class WorkLogTest {
         try { log.addInside(DAY, work, WorkLog.Kind.BREAK, 0); throw new AssertionError("Added to a full period"); }
         catch (IllegalArgumentException expected) { assertions++; }
         WorkLog running = new WorkLog();
-        running.punchIn(at("09:00"), UTC);
-        try { running.addWork(DAY, at("10:00"), UTC); throw new AssertionError("Added work while punched in"); }
+        running.punchIn(J, at("09:00"), UTC);
+        try { running.addWork(DAY, at("10:00"), UTC, J); throw new AssertionError("Added work while punched in"); }
         catch (IllegalArgumentException expected) { assertions++; }
     }
 
     private static void overnight() {
         WorkLog log = new WorkLog();
-        log.punchIn(at("22:00"), UTC);
-        log.start(WorkLog.Kind.PRODUCTIVE, Instant.parse("2026-10-29T01:00:00Z").getEpochSecond(), UTC);
-        log.punchOut(Instant.parse("2026-10-29T06:00:00Z").getEpochSecond());
+        log.punchIn(J, at("22:00"), UTC);
+        log.start(WorkLog.Kind.PRODUCTIVE, J, Instant.parse("2026-10-29T01:00:00Z").getEpochSecond());
+        log.punchOut(J, Instant.parse("2026-10-29T06:00:00Z").getEpochSecond());
         check(log.days.size() == 1 && log.periods(DAY).size() == 2, "A night shift stays on the day it started");
         check(log.totals(DAY, 0).punched == hours(8) && log.totals(DAY, 0).productive == hours(5), "Night shift totals");
     }
 
     private static void storage() {
         WorkLog log = sample();
-        log.punchIn(at("18:00"), UTC);
+        log.punchIn(J, at("18:00"), UTC);
         String text = WorkLog.text(log.periods(DAY));
         check(text.startsWith("W" + at("09:00") + "-" + at("17:00") + ",P") && text.endsWith("-0"), "Compact text, open end as 0");
         WorkLog copy = new WorkLog();
@@ -176,45 +179,62 @@ public final class WorkLogTest {
 
     private static void jobs() {
         WorkLog log = new WorkLog();
-        check(log.activeJobs().equals(List.of(WorkLog.FIRST_JOB)) && log.jobName(1).equals("Main job"), "Starts with one job");
+        check(log.activeJobs().equals(List.of(J)) && log.jobName(J).equals("Main job"), "Starts with one job");
         int cafe = log.addJob("  Cafe,   evenings ");
         check(log.jobName(cafe).equals("Cafe, evenings") && log.jobsDirty, "Names are tidied; jobs marked for saving");
         try { log.addJob("  "); throw new AssertionError("Accepted a blank name"); }
         catch (IllegalArgumentException expected) { assertions++; }
-        // Punching in uses the selected job; picking another job while punched in switches work at that moment.
-        log.selected = cafe;
-        log.punchIn(at("09:00"), UTC);
-        log.start(WorkLog.Kind.PRODUCTIVE, at("09:30"), UTC);
-        log.selectJob(WorkLog.FIRST_JOB, at("12:00"), UTC);
-        List<WorkLog.Period> work = log.work(DAY);
-        check(work.size() == 2 && work.get(0).job == cafe && work.get(0).end == at("12:00")
-                && work.get(1).job == WorkLog.FIRST_JOB && work.get(1).open(), "Switching jobs splits the work");
-        check(!log.running(WorkLog.Kind.PRODUCTIVE), "Switching jobs ends productive time");
-        log.selectJob(WorkLog.FIRST_JOB, at("12:30"), UTC);
-        check(log.work(DAY).size() == 2, "Picking the current job changes nothing");
-        log.start(WorkLog.Kind.BREAK, at("13:00"), UTC);
-        log.punchOut(at("17:00"));
-        check(log.totals(DAY, 0, cafe).punched == hours(3) && log.totals(DAY, 0, cafe).productive == minutes(150),
-                "Totals by job: own work and productive time");
-        check(log.totals(DAY, 0, WorkLog.FIRST_JOB).punched == hours(5) && log.totals(DAY, 0, WorkLog.FIRST_JOB).breaks == hours(4),
-                "Break time counts toward its work period's job");
-        check(log.totals(DAY, 0).punched == hours(8), "All-job totals");
-        check(log.jobsOn(DAY).equals(List.of(WorkLog.FIRST_JOB, cafe)), "Jobs worked on a day");
+        // Jobs run independently and at the same time; nothing is punched in or out for you.
+        log.punchIn(cafe, at("09:00"), UTC);
+        log.start(WorkLog.Kind.PRODUCTIVE, cafe, at("09:30"));
+        log.punchIn(J, at("10:00"), UTC);
+        check(log.working(cafe) && log.working(J) && log.running(WorkLog.Kind.PRODUCTIVE, cafe)
+                && log.workingJobs().equals(List.of(J, cafe)), "Punching in to a second job leaves the first running");
+        log.start(WorkLog.Kind.PRODUCTIVE, J, at("10:15"));
+        check(log.running(WorkLog.Kind.PRODUCTIVE, J) && log.running(WorkLog.Kind.PRODUCTIVE, cafe), "Productive at both jobs");
+        check(log.canStart(WorkLog.Kind.BREAK, cafe) == false && !log.canStart(WorkLog.Kind.BREAK, J), "Per-job break rule");
+        log.stop(WorkLog.Kind.PRODUCTIVE, cafe, at("12:00"));
+        log.start(WorkLog.Kind.BREAK, cafe, at("12:00"));
+        check(log.running(WorkLog.Kind.PRODUCTIVE, J) && log.running(WorkLog.Kind.BREAK, cafe), "One job on break, the other productive");
+        log.punchOut(cafe, at("13:00"));
+        check(!log.working(cafe) && log.working(J) && log.running(WorkLog.Kind.PRODUCTIVE, J),
+                "Punching out of one job leaves the other running");
+        log.punchOut(J, at("17:00"));
+        check(log.totals(DAY, 0, cafe).punched == hours(4) && log.totals(DAY, 0, cafe).productive == minutes(150)
+                && log.totals(DAY, 0, cafe).breaks == hours(1), "Totals by job");
+        check(log.totals(DAY, 0, J).punched == hours(7) && log.totals(DAY, 0, J).productive == minutes(405),
+                "The other job's totals");
+        check(log.totals(DAY, 0).punched == hours(11), "All-job totals add each job's own time");
+        check(log.jobsOn(DAY).equals(List.of(J, cafe)), "Jobs worked on a day");
+        // Overlapping work periods of different jobs keep their own children.
+        WorkLog.Period cafeWork = log.work(DAY, cafe).get(0), mainWork = log.work(DAY, J).get(0);
+        check(log.children(DAY, cafeWork).size() == 2 && log.children(DAY, mainWork).size() == 1, "Children stay with their job");
+        // Editing limits apply within a job only.
+        check(log.clamp(DAY, mainWork, true, at("08:00"), 0, UTC) == at("08:00"), "A job's work may overlap another job's");
         String[] rows = WorkCsv.daily(log, DAY, DAY, WorkLog.ALL_JOBS, 0, UTC).split("\r\n");
         check(rows.length == 3 && rows[1].contains(",Main job,") && rows[2].contains(",\"Cafe, evenings\","), "A row per job");
         check(WorkCsv.daily(log, DAY, DAY, cafe, 0, UTC).split("\r\n").length == 2, "Export filtered to one job");
-        check(WorkCsv.periods(log, DAY, DAY, cafe, 0, UTC).split("\r\n").length == 3, "Periods filtered to one job");
-        // Storage keeps the job of each work period; the first job needs no marker.
+        check(WorkCsv.periods(log, DAY, DAY, cafe, 0, UTC).split("\r\n").length == 4, "Periods filtered to one job");
+        // Storage keeps every period's job; the first job needs no marker.
         String text = WorkLog.text(log.periods(DAY));
-        check(text.contains("@" + cafe) && !text.contains("@" + WorkLog.FIRST_JOB), "Job marker on work periods");
+        check(text.contains("@" + cafe) && !text.contains("@" + J), "Job marker on periods");
         WorkLog copy = new WorkLog();
         copy.readJobs(log.jobsText());
         copy.read(DAY, text);
-        check(copy.jobName(cafe).equals("Cafe, evenings") && copy.work(DAY).get(0).job == cafe
-                && copy.work(DAY).get(1).job == WorkLog.FIRST_JOB, "Jobs and markers round-trip");
+        check(copy.jobName(cafe).equals("Cafe, evenings") && copy.work(DAY, cafe).size() == 1
+                && copy.children(DAY, copy.work(DAY, cafe).get(0)).size() == 2, "Jobs and markers round-trip");
         WorkLog legacy = new WorkLog();
         legacy.read(DAY, "W" + at("09:00") + "-" + at("17:00"));
-        check(legacy.work(DAY).get(0).job == WorkLog.FIRST_JOB, "Work saved before jobs belongs to the first job");
+        check(legacy.work(DAY).get(0).job == J, "Work saved before jobs belongs to the first job");
+        WorkLog marked = new WorkLog();
+        marked.read(DAY, "W" + at("09:00") + "-" + at("17:00") + "@2,P" + at("10:00") + "-" + at("11:00"));
+        check(marked.periods(DAY).get(1).job == 2, "An unmarked child inside another job's work takes that job");
+        // Moving work to another job is refused when it would overlap that job's work.
+        try { log.setJob(DAY, cafeWork, J, 0); throw new AssertionError("Moved work onto overlapping work"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        WorkLog.Period evening = log.addWork(DAY, 0, UTC, J);
+        log.setJob(DAY, evening, cafe, 0);
+        check(evening.job == cafe, "Changing a work period's job");
         // A used job is archived, keeping its name; an unused one is deleted; the last active job stays.
         log.removeJob(cafe);
         check(log.jobs.get(cafe).archived && log.jobName(cafe).equals("Cafe, evenings") && !log.activeJobs().contains(cafe),
@@ -222,25 +242,20 @@ public final class WorkLogTest {
         int unused = log.addJob("Spare");
         log.removeJob(unused);
         check(!log.jobs.containsKey(unused), "Unused job is deleted");
-        try { log.removeJob(WorkLog.FIRST_JOB); throw new AssertionError("Removed the last active job"); }
+        try { log.removeJob(J); throw new AssertionError("Removed the last active job"); }
         catch (IllegalArgumentException expected) { assertions++; }
         log.restoreJob(cafe);
-        check(log.activeJobs().contains(cafe), "Archived job can be restored");
         log.renameJob(cafe, "Cafe");
-        check(log.jobName(cafe).equals("Cafe"), "Rename");
-        log.selected = cafe;
-        log.punchIn(at("18:00"), UTC);
-        try { log.removeJob(cafe); throw new AssertionError("Removed the job being worked"); }
+        check(log.activeJobs().contains(cafe) && log.jobName(cafe).equals("Cafe"), "Restore and rename");
+        log.punchIn(cafe, at("18:00"), UTC);
+        try { log.removeJob(cafe); throw new AssertionError("Removed a job that is punched in"); }
         catch (IllegalArgumentException expected) { assertions++; }
-        WorkLog.Period added = log.addWork(DAY.plusDays(1), 0, UTC, WorkLog.FIRST_JOB);
-        log.setJob(DAY.plusDays(1), added, cafe);
-        check(added.job == cafe && log.dirty.contains(DAY.plusDays(1)), "Changing a work period's job");
     }
 
     /** 9:00–17:00 work with productive 9:30–11:30 and lunch 12:00–13:00. */
     private static WorkLog sample() {
         WorkLog log = new WorkLog();
-        WorkLog.Period work = log.addWork(DAY, 0, UTC);
+        WorkLog.Period work = log.addWork(DAY, 0, UTC, J);
         WorkLog.Period productive = log.addInside(DAY, work, WorkLog.Kind.PRODUCTIVE, 0);
         productive.start = at("09:30"); productive.end = at("11:30");
         WorkLog.Period lunch = log.addInside(DAY, work, WorkLog.Kind.BREAK, 0);

@@ -66,81 +66,95 @@ final class WorkRoom {
 
     private void tracker(LinearLayout content) {
         content.addView(jobBar(), a.spaced());
-        boolean working = log.working();
-        content.addView(toggle(working, "Punch out", "Punch in", () -> {
-            if (log.working()) log.punchOut(now()); else log.punchIn(now(), zone());
+        int job = log.selected;
+        TextView heading = a.text(log.jobName(job), 17, a.palette.text);
+        heading.setTypeface(null, Typeface.BOLD);
+        heading.setPadding(a.dp(4), 0, a.dp(4), a.dp(8));
+        content.addView(heading);
+        // Each toggle acts on the selected job only; one that cannot apply yet is shown disabled, never changed for you.
+        content.addView(toggle(log.working(job), true, "Punch out", "Punch in", () -> {
+            if (log.working(job)) log.punchOut(job, now()); else log.punchIn(job, now(), zone());
         }), a.spaced());
-        content.addView(toggle(log.running(WorkLog.Kind.PRODUCTIVE), "Stop productive", "Start productive", () -> {
-            if (log.running(WorkLog.Kind.PRODUCTIVE)) log.stop(WorkLog.Kind.PRODUCTIVE, now());
-            else log.start(WorkLog.Kind.PRODUCTIVE, now(), zone());
+        content.addView(toggle(log.running(WorkLog.Kind.PRODUCTIVE, job), log.canStart(WorkLog.Kind.PRODUCTIVE, job),
+                "Stop productive", "Start productive", () -> {
+            if (log.running(WorkLog.Kind.PRODUCTIVE, job)) log.stop(WorkLog.Kind.PRODUCTIVE, job, now());
+            else log.start(WorkLog.Kind.PRODUCTIVE, job, now());
         }), a.spaced());
-        content.addView(toggle(log.running(WorkLog.Kind.BREAK), "Stop lunch/break", "Start lunch/break", () -> {
-            if (log.running(WorkLog.Kind.BREAK)) log.stop(WorkLog.Kind.BREAK, now());
-            else log.start(WorkLog.Kind.BREAK, now(), zone());
+        content.addView(toggle(log.running(WorkLog.Kind.BREAK, job), log.canStart(WorkLog.Kind.BREAK, job),
+                "Stop lunch/break", "Start lunch/break", () -> {
+            if (log.running(WorkLog.Kind.BREAK, job)) log.stop(WorkLog.Kind.BREAK, job, now());
+            else log.start(WorkLog.Kind.BREAK, job, now());
         }), a.spaced());
+        String hint = !log.working(job) ? "Punch in to " + log.jobName(job) + " to start productive time or a break."
+                : log.running(WorkLog.Kind.PRODUCTIVE, job) ? "Stop productive time to start a break."
+                : log.running(WorkLog.Kind.BREAK, job) ? "Stop the break to start productive time." : null;
+        if (hint != null) {
+            TextView note = a.text(hint, 13, a.palette.secondary);
+            note.setPadding(a.dp(4), 0, a.dp(4), a.dp(12));
+            content.addView(note);
+        }
 
         // A shift that runs past midnight keeps showing the day it started.
-        var open = log.openWork();
+        var open = log.openWork(job);
         LocalDate day = open != null ? open.getKey() : LocalDate.now();
         WorkLog.Totals totals = log.totals(day, now());
         LinearLayout card = a.card(18);
         TextView title = a.text(day.equals(LocalDate.now()) ? "Today" : day.format(DAY), 19, a.palette.text);
         title.setTypeface(null, Typeface.BOLD); card.addView(title);
-        a.line(card, open != null ? "Punched in to " + log.jobName(open.getValue().job) + " since "
-                + Instant.ofEpochSecond(open.getValue().start).atZone(zone()).format(a.timeFormat())
-                : "Not punched in · next punch in goes to " + log.jobName(log.selected));
+        List<Integer> working = log.workingJobs();
+        if (working.isEmpty()) a.line(card, "Not punched in");
+        for (int on : working) {
+            a.line(card, log.jobName(on) + " · " + state(on) + " since " + Instant.ofEpochSecond(log.openWork(on).getValue().start)
+                    .atZone(zone()).format(a.timeFormat()));
+        }
         a.line(card, "Worked " + WorkCsv.clock(totals.worked()) + " · Break " + WorkCsv.clock(totals.breaks));
         a.line(card, "Productive " + WorkCsv.clock(totals.productive)
                 + " · Unproductive " + WorkCsv.clock(totals.unproductive()));
         List<Integer> jobsToday = log.jobsOn(day);
         if (jobsToday.size() > 1) {
-            for (int job : jobsToday) {
-                a.line(card, log.jobName(job) + " · worked " + WorkCsv.clock(log.totals(day, now(), job).worked()));
+            for (int other : jobsToday) {
+                a.line(card, log.jobName(other) + " · worked " + WorkCsv.clock(log.totals(day, now(), other).worked()));
             }
         }
         content.addView(card, a.spaced());
         content.addView(a.button("View day", () -> openDay(day)));
     }
 
-    /**
-     * The jobs to punch in to. Picking a job while punched in to another ends that work and starts this job;
-     * otherwise it only chooses the job for the next punch in.
-     */
+    /** "Punched in", "Productive" or "On break" for a punched-in job; "Off" otherwise. */
+    private String state(int job) {
+        return !log.working(job) ? "Off" : log.running(WorkLog.Kind.PRODUCTIVE, job) ? "Productive"
+                : log.running(WorkLog.Kind.BREAK, job) ? "On break" : "Punched in";
+    }
+
+    /** The jobs, each showing its state; picking one only chooses which job the toggles act on. */
     private LinearLayout jobBar() {
         LinearLayout bar = a.column();
         HorizontalScrollView scroll = new HorizontalScrollView(a);
         scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(a);
-        var open = log.openWork();
-        int current = open != null ? open.getValue().job : log.selected;
         for (int job : log.activeJobs()) {
-            boolean on = job == current;
-            Button chip = a.button(log.jobName(job), () -> pickJob(job));
+            boolean on = job == log.selected;
+            Button chip = a.button(log.jobName(job) + "\n" + state(job), () -> pickJob(job));
             chip.setSelected(on);
             chip.setBackground(a.background(on ? a.palette.highlight : a.palette.surface, 12, true));
             chip.setTextColor(on ? a.palette.highlightText : a.palette.text);
-            chip.setContentDescription(log.jobName(job) + (on ? ", selected job" : ", job"));
+            chip.setContentDescription(log.jobName(job) + ", " + state(job) + (on ? ", selected" : ""));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
             params.setMarginEnd(a.dp(8));
             row.addView(chip, params);
         }
         row.addView(a.button("Jobs…", this::manageJobs));
         scroll.addView(row);
-        bar.addView(a.label("Job"));
+        bar.addView(a.label("Jobs"));
         bar.addView(scroll);
         return bar;
     }
 
+    /** Chooses the job the toggles act on; nothing is punched in or out, and nothing is written. */
     private void pickJob(int job) {
         chosenJob = job;
-        var open = log.openWork();
-        if (open != null && open.getValue().job != job) {
-            log.selectJob(job, now(), zone());
-            save();
-        } else {
-            log.selected = job;
-            a.rerender();
-        }
+        log.selected = job;
+        a.rerender();
     }
 
     private void manageJobs() {
@@ -186,12 +200,15 @@ final class WorkRoom {
                 }).show();
     }
 
-    /** A toggle highlights in the selection colour while its state is on. */
-    private Button toggle(boolean on, String onLabel, String offLabel, Runnable change) {
+    /** A toggle highlights in the selection colour while on; one that cannot be used yet is dimmed and disabled. */
+    private Button toggle(boolean on, boolean usable, String onLabel, String offLabel, Runnable change) {
         Button toggle = a.button(on ? onLabel : offLabel, () -> {
-            change.run();
+            try { change.run(); }
+            catch (IllegalArgumentException e) { a.message(e.getMessage()); return; }
             save();
         });
+        toggle.setEnabled(on || usable);
+        toggle.setAlpha(on || usable ? 1f : .45f);
         toggle.setSelected(on);
         toggle.setTextSize(17);
         toggle.setMinHeight(a.dp(64));

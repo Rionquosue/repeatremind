@@ -246,17 +246,24 @@ public final class SmokeInstrumentation extends Instrumentation {
             Activity tracker = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             ui(() -> findText(tracker, "Work tracker").performClick()); waitForIdleSync();
-            await(() -> findText(tracker, "Punch in") != null && findText(tracker, "Main job") != null
-                    && findText(tracker, "Main job").isSelected(), "Work tracker room shows the punch clock and job");
+            await(() -> findText(tracker, "Punch in") != null && findTextStarting(tracker, "Main job") != null
+                    && findTextStarting(tracker, "Main job").isSelected(), "Work tracker room shows the punch clock and job");
+            check(!findText(tracker, "Start productive").isEnabled() && !findText(tracker, "Start lunch/break").isEnabled(),
+                    "Productive and break wait for punch in");
+            ui(() -> findText(tracker, "Punch in").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch out") != null && findText(tracker, "Start productive").isEnabled(),
+                    "Punch in enables productive time");
             ui(() -> findText(tracker, "Start productive").performClick()); waitForIdleSync();
-            await(() -> findText(tracker, "Stop productive") != null && findText(tracker, "Punch out") != null,
-                    "Starting productive time punches in");
+            await(() -> findText(tracker, "Stop productive") != null, "Productive time starts");
             check(findText(tracker, "Stop productive").isSelected() && findText(tracker, "Punch out").isSelected(),
                     "Active toggles are highlighted");
-            check(new WorkLogStore(context).load().running(WorkLog.Kind.PRODUCTIVE), "Productive time is stored");
+            check(!findText(tracker, "Start lunch/break").isEnabled(), "A break is unavailable while productive, not switched for you");
+            check(new WorkLogStore(context).load().running(WorkLog.Kind.PRODUCTIVE, WorkLog.FIRST_JOB), "Productive time is stored");
+            ui(() -> findText(tracker, "Stop productive").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Start lunch/break") != null && findText(tracker, "Start lunch/break").isEnabled(),
+                    "Stopping productive time allows a break");
             ui(() -> findText(tracker, "Start lunch/break").performClick()); waitForIdleSync();
-            await(() -> findText(tracker, "Stop lunch/break") != null && findText(tracker, "Start productive") != null,
-                    "A break ends productive time");
+            await(() -> findText(tracker, "Stop lunch/break") != null, "A break starts");
             screenshot("smoke-tracker.png");
             ui(() -> findText(tracker, "Punch out").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Punch in") != null && findText(tracker, "Start lunch/break") != null
@@ -270,6 +277,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             await(() -> findText(export, "Recommended import settings") != null && findText(export, "Save CSV") != null,
                     "Export screen shows its options and import settings");
             screenshot("smoke-export.png"); ui(export::finish); waitForIdleSync();
+            await(tracker::hasWindowFocus, "Work tracker is back in front after export");
             ActivityMonitor dayMonitor = addMonitor(WorkDayActivity.class.getName(), null, false);
             ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
             Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
@@ -357,6 +365,10 @@ public final class SmokeInstrumentation extends Instrumentation {
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) collect(group.getChildAt(i), all);
         }
+    }
+    private TextView findTextStarting(Activity activity, String prefix) {
+        return flatten(activity).stream().filter(v -> v instanceof TextView)
+                .map(v -> (TextView) v).filter(v -> v.getText().toString().startsWith(prefix)).findFirst().orElse(null);
     }
     private TextView findText(Activity activity, String value) {
         return flatten(activity).stream().filter(v -> v instanceof TextView)

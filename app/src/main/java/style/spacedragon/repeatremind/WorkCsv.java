@@ -54,7 +54,7 @@ final class WorkCsv {
         StringBuilder csv = new StringBuilder(PERIODS_HEADER).append("\r\n");
         for (LocalDate day : log.days.subMap(first, true, last, true).keySet()) {
             for (WorkLog.Period period : log.periods(day)) {
-                int periodJob = log.jobOf(day, period, now);
+                int periodJob = period.job;
                 if (job != WorkLog.ALL_JOBS && periodJob != job) continue;
                 long length = period.length(now);
                 csv.append(day).append(',').append(weekday(day)).append(',').append(cell(log.jobName(periodJob))).append(',')

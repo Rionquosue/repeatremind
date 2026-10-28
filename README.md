@@ -46,21 +46,24 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
 - **Temporary task** runs for a set number of days, weeks, months or years counted from the start
   date, then disables itself. The list shows its last day and then **Ended**. Missed days stop at
   the last day. To run it again, lengthen it or move the start date, then re-enable it.
-- **Work tracker → Tracker** has three toggles that highlight while on: **Punch in/out**,
-  **Start/stop productive** and **Start/stop lunch/break**. Productive time and breaks never run together,
-  starting either one punches you in, and punching out stops everything. Today's worked, productive,
-  unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
+- **Work tracker → Tracker** has three toggles for the selected job that highlight while on:
+  **Punch in/out**, **Start/stop productive** and **Start/stop lunch/break**. You switch every toggle
+  yourself: productive time and breaks need that job to be punched in, and each is unavailable (shown
+  dimmed) while the other runs for that job. Punching out of a job also ends that job's productive or break
+  time, which cannot outlast it. Today's worked, productive, unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
   nothing is written on a timer. A shift past midnight stays on the day it started.
-- **Jobs:** the row above the toggles holds your jobs. Tap one to choose where the next punch in goes;
-  tapping another job while punched in ends that work and starts the new job at the same moment.
-  **Jobs…** adds or renames jobs. A job with no recorded work is deleted; one with work is archived,
-  so its history and exports keep its name, and can be restored. Productive and break time count toward
-  the job of the work period they fall in. Choosing a job writes nothing until the next punch in.
+- **Jobs:** the row above the toggles holds your jobs, each showing whether it is off, punched in,
+  productive or on break. Tap a job to point the toggles at it; nothing is punched in or out for you.
+  Several jobs can be punched in, and productive, at the same time, each with its own timeline. Day totals
+  add each job's own time. **Jobs…** adds or renames jobs. A job with no recorded work is deleted; one with
+  work is archived, so its history and exports keep its name, and can be restored. Choosing a job writes
+  nothing.
 - **Work tracker → Details** is a calendar: each worked day has a circle that grows with the hours
   worked. Tap a day for its candle graph: work periods in the first column; productive, unproductive
   and break time in the second. Drag the round handles at the start and end of a period to move it in
-  5-minute steps, or tap a handle to set the exact minute with the system time picker. Periods never
-  overlap, and productive and break time stay inside their work period. The list below the graph does
+  5-minute steps, or tap a handle to set the exact minute with the system time picker. Within a job,
+  periods never overlap and productive and break time stay inside their work period; jobs that overlap in
+  time get side-by-side lanes in each column. The list below the graph does
   the same with buttons, and can add or delete periods. Worked time excludes breaks; unproductive time is
   worked time that was not productive.
 - **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage

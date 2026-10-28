@@ -41,7 +41,7 @@ final class WorkLog {
     static final class Period {
         final Kind kind;
         long start, end;
-        /** The job of a work period; productive and break periods belong to their work period's job. */
+        /** The job this period belongs to; productive and break periods share their work period's job. */
         int job = FIRST_JOB;
 
         Period(Kind kind, long start, long end) { this.kind = kind; this.start = start; this.end = end; }
@@ -70,7 +70,7 @@ final class WorkLog {
     final Set<LocalDate> dirty = new TreeSet<>();
     final TreeMap<Integer, Job> jobs = new TreeMap<>();
     boolean jobsDirty;
-    /** The job new work goes to; saved with the next punch in rather than when it is picked. */
+    /** The job the tracker's toggles act on; saved with the next change rather than when it is picked. */
     int selected = FIRST_JOB;
 
     WorkLog() { jobs.put(FIRST_JOB, new Job("Main job", false)); }
@@ -111,8 +111,7 @@ final class WorkLog {
     /** Deletes a job with no recorded work; a job with work is archived instead, so its history keeps its name. */
     void removeJob(int job) {
         if (activeJobs().size() <= 1 && !jobs.get(job).archived) throw new IllegalArgumentException("Keep at least one job");
-        var open = openWork();
-        if (open != null && open.getValue().job == job) throw new IllegalArgumentException("Punch out of this job first");
+        if (working(job)) throw new IllegalArgumentException("Punch out of this job first");
         if (used(job)) jobs.get(job).archived = true; else jobs.remove(job);
         if (selected == job) selected = activeJobs().get(0);
         jobsDirty = true;
@@ -128,17 +127,6 @@ final class WorkLog {
         if (trimmed.isEmpty()) throw new IllegalArgumentException("Enter a job name");
         if (trimmed.length() > 60) throw new IllegalArgumentException("Use 60 characters or fewer");
         return trimmed;
-    }
-
-    /** Picks the job for new work; while punched in to another job, ends that work and starts this one. */
-    void selectJob(int job, long now, ZoneId zone) {
-        if (!jobs.containsKey(job)) return;
-        selected = job;
-        var open = openWork();
-        if (open != null && open.getValue().job != job) {
-            punchOut(now);
-            punchIn(now, zone);
-        }
     }
 
     /** One job per line: id, archived flag (0 or 1) and name, separated by '|'. */
@@ -164,63 +152,84 @@ final class WorkLog {
     }
 
     // ---- Punch clock ----
+    // Each job has its own clock: several jobs can be punched in, and productive at once. Nothing starts or stops
+    // another toggle by itself, except that punching out of a job ends that job's productive or break time.
 
-    /** The running work period and the day it belongs to, or null. */
-    Map.Entry<LocalDate, Period> openWork() {
+    /** The running work period of a job and the day it belongs to, or null. */
+    Map.Entry<LocalDate, Period> openWork(int job) {
         for (var day : days.descendingMap().entrySet()) {
             for (Period period : day.getValue()) {
-                if (period.kind == Kind.WORK && period.open()) return new AbstractMap.SimpleImmutableEntry<>(day.getKey(), period);
+                if (period.kind == Kind.WORK && period.job == job && period.open()) {
+                    return new AbstractMap.SimpleImmutableEntry<>(day.getKey(), period);
+                }
             }
         }
         return null;
     }
 
-    boolean working() { return openWork() != null; }
+    boolean working(int job) { return openWork(job) != null; }
 
-    boolean running(Kind kind) {
-        var work = openWork();
+    /** Whether any job is punched in. */
+    boolean working() {
+        for (int job : jobs.keySet()) if (working(job)) return true;
+        return false;
+    }
+
+    /** Jobs punched in right now. */
+    List<Integer> workingJobs() {
+        List<Integer> working = new ArrayList<>();
+        for (int job : jobs.keySet()) if (working(job)) working.add(job);
+        return working;
+    }
+
+    boolean running(Kind kind, int job) {
+        var work = openWork(job);
         if (work == null) return false;
         for (Period period : days.get(work.getKey())) {
-            if (period.kind == kind && period.open()) return true;
+            if (period.kind == kind && period.job == job && period.open()) return true;
         }
         return false;
     }
 
-    /** Punches in to the selected job. */
-    void punchIn(long now, ZoneId zone) {
-        if (working()) return;
-        LocalDate day = date(now, zone);
-        add(day, new Period(Kind.WORK, now, OPEN, selected));
+    /** Whether productive or break time can start for this job now: punched in, and the other one not running. */
+    boolean canStart(Kind kind, int job) {
+        if (kind == Kind.WORK) return !working(job);
+        Kind other = kind == Kind.PRODUCTIVE ? Kind.BREAK : Kind.PRODUCTIVE;
+        return working(job) && !running(other, job);
     }
 
-    /** Ends the running work period and anything running inside it. */
-    void punchOut(long now) {
-        var work = openWork();
+    void punchIn(int job, long now, ZoneId zone) {
+        if (working(job)) return;
+        selected = job;
+        add(date(now, zone), new Period(Kind.WORK, now, OPEN, job));
+    }
+
+    /** Ends a job's running work period, and its productive or break time, which cannot outlast it. */
+    void punchOut(int job, long now) {
+        var work = openWork(job);
         if (work == null) return;
         for (Period period : days.get(work.getKey())) {
-            if (period.open()) period.end = Math.max(period.start, now);
+            if (period.job == job && period.open()) period.end = Math.max(period.start, now);
         }
         dirty.add(work.getKey());
     }
 
-    /** Starts productive or break time, punching in first if needed; the two never run together. */
-    void start(Kind kind, long now, ZoneId zone) {
-        if (kind == Kind.WORK) { punchIn(now, zone); return; }
-        punchIn(now, zone);
-        var work = openWork();
-        List<Period> periods = days.get(work.getKey());
-        for (Period period : periods) {
-            if (period.kind == kind && period.open()) return;
+    /** Starts productive or break time for a job; refused unless punched in and the other one is stopped. */
+    void start(Kind kind, int job, long now) {
+        if (kind == Kind.WORK || running(kind, job)) return;
+        if (!working(job)) throw new IllegalArgumentException("Punch in to " + jobName(job) + " first");
+        if (!canStart(kind, job)) {
+            throw new IllegalArgumentException(kind == Kind.PRODUCTIVE ? "Stop the lunch/break first" : "Stop productive time first");
         }
-        stop(kind == Kind.PRODUCTIVE ? Kind.BREAK : Kind.PRODUCTIVE, now);
-        add(work.getKey(), new Period(kind, Math.max(now, work.getValue().start), OPEN));
+        var work = openWork(job);
+        add(work.getKey(), new Period(kind, Math.max(now, work.getValue().start), OPEN, job));
     }
 
-    void stop(Kind kind, long now) {
-        var work = openWork();
+    void stop(Kind kind, int job, long now) {
+        var work = openWork(job);
         if (work == null) return;
         for (Period period : days.get(work.getKey())) {
-            if (period.kind == kind && period.open()) {
+            if (period.kind == kind && period.job == job && period.open()) {
                 period.end = Math.max(period.start, now);
                 dirty.add(work.getKey());
             }
@@ -231,11 +240,11 @@ final class WorkLog {
 
     Totals totals(LocalDate day, long now) { return totals(day, now, ALL_JOBS); }
 
-    /** Totals for one job, or for all jobs with ALL_JOBS. */
+    /** Totals for one job, or summed over all jobs with ALL_JOBS; overlapping jobs each count their own time. */
     Totals totals(LocalDate day, long now, int job) {
         Totals totals = new Totals();
         for (Period period : days.getOrDefault(day, Collections.emptyList())) {
-            if (job != ALL_JOBS && jobOf(day, period, now) != job) continue;
+            if (job != ALL_JOBS && period.job != job) continue;
             long length = period.length(now);
             switch (period.kind) {
                 case WORK -> totals.punched += length;
@@ -244,13 +253,6 @@ final class WorkLog {
             }
         }
         return totals;
-    }
-
-    /** The job a period counts toward: its own for work, its work period's for productive and break time. */
-    int jobOf(LocalDate day, Period period, long now) {
-        if (period.kind == Kind.WORK) return period.job;
-        Period parent = parent(day, period, now);
-        return parent == null ? FIRST_JOB : parent.job;
     }
 
     /** Jobs with work on this day, in job order. */
@@ -268,18 +270,25 @@ final class WorkLog {
         return work;
     }
 
-    /** The work period on this day that contains the given period: the last one starting at or before it. */
-    Period parent(LocalDate day, Period child, long now) {
+    /** A job's work periods on a day, in time order. */
+    List<Period> work(LocalDate day, int job) {
+        List<Period> work = new ArrayList<>();
+        for (Period period : periods(day)) if (period.kind == Kind.WORK && period.job == job) work.add(period);
+        return work;
+    }
+
+    /** The work period containing a productive or break period: its job's last one starting at or before it. */
+    Period parent(LocalDate day, Period child) {
         Period parent = null;
-        for (Period work : work(day)) if (work.start <= child.start) parent = work;
+        for (Period work : work(day, child.job)) if (work.start <= child.start) parent = work;
         return parent;
     }
 
     /** Productive and break periods inside a work period, in time order. */
-    List<Period> children(LocalDate day, Period work, long now) {
+    List<Period> children(LocalDate day, Period work) {
         List<Period> children = new ArrayList<>();
         for (Period period : periods(day)) {
-            if (period.kind != Kind.WORK && parent(day, period, now) == work) children.add(period);
+            if (period.kind != Kind.WORK && period.job == work.job && parent(day, period) == work) children.add(period);
         }
         return children;
     }
@@ -290,18 +299,19 @@ final class WorkLog {
     static long snap(long time) { return Math.floorDiv(time + STEP / 2, STEP) * STEP; }
 
     /**
-     * The nearest allowed value for one edge of a period: work periods never overlap and always contain their
-     * productive and break periods, which never overlap each other. A running end is not editable.
+     * The nearest allowed value for one edge of a period. Within a job, work periods never overlap and always
+     * contain their productive and break periods, which never overlap each other. Different jobs may overlap.
+     * A running end is not editable.
      */
     long clamp(LocalDate day, Period period, boolean start, long to, long now, ZoneId zone) {
         long low, high;
         if (period.kind == Kind.WORK) {
             Period before = null, after = null;
-            for (Period other : work(day)) {
+            for (Period other : work(day, period.job)) {
                 if (other == period) continue;
                 if (other.start < period.start) before = other; else if (after == null) after = other;
             }
-            List<Period> children = children(day, period, now);
+            List<Period> children = children(day, period);
             if (start) {
                 low = Math.max(before == null ? Long.MIN_VALUE : before.end(now), dayStart(day, zone));
                 high = Math.min(period.end(now) - MIN_LENGTH, dayStart(day, zone) + DAY - 1);
@@ -313,8 +323,8 @@ final class WorkLog {
                 high = Math.min(after == null ? Long.MAX_VALUE : after.start, period.start + DAY);
             }
         } else {
-            Period work = parent(day, period, now);
-            List<Period> siblings = children(day, work, now);
+            Period work = parent(day, period);
+            List<Period> siblings = children(day, work);
             int index = siblings.indexOf(period);
             Period before = index > 0 ? siblings.get(index - 1) : null;
             Period after = index + 1 < siblings.size() ? siblings.get(index + 1) : null;
@@ -340,33 +350,38 @@ final class WorkLog {
     }
 
     /** Removes a period; removing a work period also removes what it contains. */
-    void remove(LocalDate day, Period period, long now) {
+    void remove(LocalDate day, Period period) {
         List<Period> periods = days.get(day);
         if (periods == null) return;
-        if (period.kind == Kind.WORK) periods.removeAll(children(day, period, now));
+        if (period.kind == Kind.WORK) periods.removeAll(children(day, period));
         periods.remove(period);
         if (periods.isEmpty()) days.remove(day);
         dirty.add(day);
     }
 
-    void setJob(LocalDate day, Period work, int job) {
-        if (work.kind != Kind.WORK || !jobs.containsKey(job)) return;
+    /** Moves a work period, with what it contains, to another job; refused if it would overlap that job's work. */
+    void setJob(LocalDate day, Period work, int job, long now) {
+        if (work.kind != Kind.WORK || work.job == job || !jobs.containsKey(job)) return;
+        for (Period other : work(day, job)) {
+            if (other.start < work.end(now) && work.start < other.end(now)) {
+                throw new IllegalArgumentException(jobName(job) + " already has work at this time");
+            }
+        }
+        for (Period child : children(day, work)) child.job = job;
         work.job = job;
         dirty.add(day);
     }
 
-    Period addWork(LocalDate day, long now, ZoneId zone) { return addWork(day, now, zone, selected); }
-
-    /** Adds a finished work period: 9:00–17:00 on an empty day, else an hour after the last one. */
+    /** Adds a finished work period for a job: 9:00–17:00 if it has none that day, else an hour after its last one. */
     Period addWork(LocalDate day, long now, ZoneId zone, int job) {
-        List<Period> work = work(day);
+        List<Period> work = work(day, job);
         long start, end;
         if (work.isEmpty()) {
             start = dayStart(day, zone) + 9 * 3600;
             end = dayStart(day, zone) + 17 * 3600;
         } else {
             Period last = work.get(work.size() - 1);
-            if (last.open()) throw new IllegalArgumentException("Punch out before adding another work period");
+            if (last.open()) throw new IllegalArgumentException("Punch out of " + jobName(job) + " before adding more work");
             start = last.end;
             end = start + 3600;
             if (start >= dayStart(day, zone) + DAY) throw new IllegalArgumentException("This day has no room for another work period");
@@ -379,7 +394,7 @@ final class WorkLog {
     /** Adds up to an hour of productive or break time in the largest free gap of a work period. */
     Period addInside(LocalDate day, Period work, Kind kind, long now) {
         long gapStart = 0, gapLength = 0, cursor = work.start;
-        List<Period> children = children(day, work, now);
+        List<Period> children = children(day, work);
         List<Long> edges = new ArrayList<>();
         for (Period child : children) { edges.add(child.start); edges.add(child.end(now)); }
         edges.add(work.end(now)); edges.add(work.end(now));
@@ -389,7 +404,7 @@ final class WorkLog {
             cursor = Math.max(cursor, edges.get(i + 1));
         }
         if (gapLength < MIN_LENGTH) throw new IllegalArgumentException("This work period has no free time left");
-        Period period = new Period(kind, gapStart, gapStart + Math.min(gapLength, 3600));
+        Period period = new Period(kind, gapStart, gapStart + Math.min(gapLength, 3600), work.job);
         add(day, period);
         return period;
     }
@@ -397,7 +412,7 @@ final class WorkLog {
     // ---- Storage form ----
 
     /**
-     * One day as text: kind letter, start and end seconds, and "@job" on work periods of jobs other than the first;
+     * One day as text: kind letter, start and end seconds, and "@job" on periods of jobs other than the first;
      * e.g. "W1730000000-1730028800@2,P1730001000-1730004600".
      */
     static String text(List<Period> periods) {
@@ -405,7 +420,7 @@ final class WorkLog {
         for (Period period : periods) {
             if (text.length() > 0) text.append(',');
             text.append(period.kind.name().charAt(0)).append(period.start).append('-').append(period.end);
-            if (period.kind == Kind.WORK && period.job != FIRST_JOB) text.append('@').append(period.job);
+            if (period.job != FIRST_JOB) text.append('@').append(period.job);
         }
         return text.toString();
     }
@@ -426,6 +441,18 @@ final class WorkLog {
             periods.add(new Period(kind, Long.parseLong(part.substring(1, dash)), end, job));
         }
         periods.sort(ORDER);
+        // An unmarked productive or break period inside another job's work was saved before every period
+        // carried its job; it belongs to the work period it falls in.
+        for (Period child : periods) {
+            if (child.kind == Kind.WORK || child.job != FIRST_JOB) continue;
+            boolean inFirst = false;
+            Period container = null;
+            for (Period work : periods) {
+                if (work.kind != Kind.WORK || work.start > child.start) continue;
+                if (work.job == FIRST_JOB) inFirst = true; else container = work;
+            }
+            if (!inFirst && container != null) child.job = container.job;
+        }
         if (!periods.isEmpty()) days.put(day, periods);
     }
 

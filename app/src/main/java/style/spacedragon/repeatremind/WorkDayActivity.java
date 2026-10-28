@@ -113,7 +113,7 @@ public final class WorkDayActivity extends BaseActivity {
         rows.removeAllViews();
         for (WorkLog.Period period : log.periods(day)) {
             boolean child = period.kind != WorkLog.Kind.WORK;
-            Button row = button(name(period) + (child ? "" : " · " + log.jobName(period.job)) + " · " + range(period, now)
+            Button row = button(name(period) + (log.jobs.size() > 1 ? " · " + log.jobName(period.job) : "") + " · " + range(period, now)
                     + " (" + WorkCsv.clock(period.length(now)) + ")", () -> options(period));
             row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
             row.setBackground(background(child ? palette.surface : palette.button, 12, child));
@@ -147,7 +147,7 @@ public final class WorkDayActivity extends BaseActivity {
     private void options(WorkLog.Period period) {
         List<String> items = new ArrayList<>(java.util.Collections.singletonList("Change start"));
         if (!period.open()) items.add("Change end");
-        if (period.kind == WorkLog.Kind.WORK && log.jobs.size() > 1) items.add("Change job");
+        if (period.kind == WorkLog.Kind.WORK && log.activeJobs().size() > 1) items.add("Change job");
         items.add("Delete");
         new AlertDialog.Builder(this).setTitle(name(period) + " · " + range(period, now()))
                 .setItems(items.toArray(new String[0]), (dialog, which) -> {
@@ -155,7 +155,8 @@ public final class WorkDayActivity extends BaseActivity {
                     if (item.equals("Change start")) pickTime(period, true);
                     else if (item.equals("Change end")) pickTime(period, false);
                     else if (item.equals("Change job")) pickJob("Job for this work", period.job, job -> {
-                        log.setJob(day, period, job); save();
+                        try { log.setJob(day, period, job, now()); save(); }
+                        catch (IllegalArgumentException e) { message(e.getMessage()); }
                     });
                     else confirmDelete(period);
                 }).setNegativeButton("Cancel", null).show();
@@ -166,7 +167,7 @@ public final class WorkDayActivity extends BaseActivity {
                 ? "This also deletes the productive and break time inside it." : null;
         new AlertDialog.Builder(this).setTitle("Delete " + name(period).toLowerCase() + "?").setMessage(message)
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Delete", (dialog, which) -> { log.remove(day, period, now()); save(); }).show();
+                .setPositiveButton("Delete", (dialog, which) -> { log.remove(day, period); save(); }).show();
     }
 
     /** Minute-precise entry with the system time picker; the result is fitted to the neighbouring periods. */
@@ -210,7 +211,7 @@ public final class WorkDayActivity extends BaseActivity {
         if (work.isEmpty()) { message("Add a work period first"); return; }
         if (work.size() == 1) { addInside(work.get(0), kind); return; }
         String[] names = new String[work.size()];
-        for (int i = 0; i < names.length; i++) names[i] = "Work · " + range(work.get(i), now());
+        for (int i = 0; i < names.length; i++) names[i] = log.jobName(work.get(i).job) + " · " + range(work.get(i), now());
         new AlertDialog.Builder(this).setTitle("Add to which work period?")
                 .setItems(names, (dialog, which) -> addInside(work.get(which), kind))
                 .setNegativeButton("Cancel", null).show();
@@ -251,6 +252,7 @@ public final class WorkDayActivity extends BaseActivity {
         private final int slop;
         private long rangeStart, rangeEnd;
         private Handle active;
+        private List<Integer> lanes = java.util.Collections.singletonList(WorkLog.FIRST_JOB);
         private WorkLog.Period tapped;
         private float downY;
         private boolean moved;
@@ -323,20 +325,23 @@ public final class WorkDayActivity extends BaseActivity {
             for (int i = 0; i < COLUMNS; i++) canvas.drawText(titles[i], column(i) + columnWidth() / 2, dp(16), label);
 
             // Candles: work; productive over unproductive work time; breaks in their own column.
-            float w = columnWidth(), radius = dp(8);
+            float radius = dp(8);
+            // Jobs can overlap in time, so each column has a lane per job worked that day.
+            lanes = log.jobsOn(day);
+            if (lanes.isEmpty()) lanes = java.util.Collections.singletonList(WorkLog.FIRST_JOB);
             for (WorkLog.Period work : log.work(day)) {
                 candle(work, 0, now);
-                List<WorkLog.Period> children = log.children(day, work, now);
+                List<WorkLog.Period> children = log.children(day, work);
                 // Unproductive time is the work period outside breaks; productive time is drawn over it.
                 long from = work.start;
                 for (WorkLog.Period child : children) {
                     if (child.kind != WorkLog.Kind.BREAK) continue;
-                    track(canvas, from, child.start);
+                    track(canvas, from, child.start, work.job);
                     from = Math.max(from, child.end(now));
                 }
-                track(canvas, from, work.end(now));
+                track(canvas, from, work.end(now), work.job);
                 // The break column shows the work period faintly, for context.
-                rect.set(column(2), y(work.start), column(2) + w, y(work.end(now)));
+                rect.set(lane(2, work.job), y(work.start), lane(2, work.job) + laneWidth(), y(work.end(now)));
                 stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1)); stroke.setAlpha(110);
                 canvas.drawRoundRect(rect, radius, radius, stroke);
                 stroke.setAlpha(255);
@@ -381,9 +386,9 @@ public final class WorkDayActivity extends BaseActivity {
         }
 
         /** Unproductive time in the productive column. */
-        private void track(Canvas canvas, long from, long to) {
+        private void track(Canvas canvas, long from, long to, int job) {
             if (to <= from) return;
-            rect.set(column(1), y(from), column(1) + columnWidth(), y(to));
+            rect.set(lane(1, job), y(from), lane(1, job) + laneWidth(), y(to));
             fill.setColor(palette.surface);
             canvas.drawRoundRect(rect, dp(8), dp(8), fill);
             stroke.setColor(palette.border); stroke.setStrokeWidth(dp(1));
@@ -392,19 +397,29 @@ public final class WorkDayActivity extends BaseActivity {
 
         /** Records a candle and its handles, centred on the candle; a running period has no end handle. */
         private void candle(WorkLog.Period period, int column, long now) {
-            float left = column(column), top = y(period.start);
+            float left = lane(column, period.job), top = y(period.start);
             float bottom = Math.max(y(period.end(now)), top + dp(2));
-            bars.add(new RectF(left, top, left + columnWidth(), bottom));
+            bars.add(new RectF(left, top, left + laneWidth(), bottom));
             barPeriods.add(period);
-            float centre = left + columnWidth() / 2;
+            float centre = left + laneWidth() / 2;
+            // Handles group by column and lane, since only handles in the same lane can collide.
+            int group = column * 1000 + Math.max(0, lanes.indexOf(period.job));
             Handle start = new Handle(period, true);
-            start.x = centre; start.y = top; start.column = column;
+            start.x = centre; start.y = top; start.column = group;
             handles.add(start);
             if (!period.open()) {
                 Handle end = new Handle(period, false);
-                end.x = centre; end.y = bottom; end.column = column;
+                end.x = centre; end.y = bottom; end.column = group;
                 handles.add(end);
             }
+        }
+
+        private float laneGap() { return dp(4); }
+
+        private float laneWidth() { return (columnWidth() - laneGap() * (lanes.size() - 1)) / lanes.size(); }
+
+        private float lane(int column, int job) {
+            return column(column) + Math.max(0, lanes.indexOf(job)) * (laneWidth() + laneGap());
         }
 
         /**
@@ -414,9 +429,11 @@ public final class WorkDayActivity extends BaseActivity {
         private Map<WorkLog.Period, Integer> spread() {
             Map<WorkLog.Period, Integer> shades = new HashMap<>();
             float apart = handleRadius() * 2 + dp(6);
-            for (int column = 0; column < COLUMNS; column++) {
+            java.util.Set<Integer> groups = new java.util.TreeSet<>();
+            for (Handle handle : handles) groups.add(handle.column);
+            for (int group : groups) {
                 List<Handle> inColumn = new ArrayList<>();
-                for (Handle handle : handles) if (handle.column == column) inColumn.add(handle);
+                for (Handle handle : handles) if (handle.column == group) inColumn.add(handle);
                 inColumn.sort((a, b) -> Float.compare(a.y, b.y));
                 for (int i = 0; i < inColumn.size(); ) {
                     int j = i + 1;
