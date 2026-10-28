@@ -11,9 +11,9 @@ import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.HorizontalScrollView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.time.DayOfWeek;
@@ -91,10 +91,6 @@ final class WorkRoom {
     private void tracker(LinearLayout content) {
         content.addView(jobBar(), a.spaced());
         int job = log.selected;
-        TextView heading = a.text(log.jobName(job), 17, a.palette.text);
-        heading.setTypeface(null, Typeface.BOLD);
-        heading.setPadding(a.dp(4), 0, a.dp(4), a.dp(8));
-        content.addView(heading);
         // Each toggle acts on the selected job only; one that cannot apply yet is shown disabled, never changed for you.
         content.addView(toggle(log.working(job), true, "Punch out", "Punch in", () -> {
             if (log.working(job)) log.punchOut(job, now()); else log.punchIn(job, now(), zone());
@@ -158,32 +154,37 @@ final class WorkRoom {
                 : log.running(WorkLog.Kind.BREAK, job) ? "On break" : "Punched in";
     }
 
-    /** The jobs, each showing its state; picking one only chooses which job the toggles act on. */
+    /** One row: a dropdown of the jobs, each with its state, and the job manager. Picking only chooses which job the toggles act on. */
     private LinearLayout jobBar() {
-        LinearLayout bar = a.column();
-        HorizontalScrollView scroll = new HorizontalScrollView(a);
-        scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(a);
-        for (int job : log.activeJobs()) {
-            boolean on = job == log.selected;
-            Button chip = a.button(log.jobName(job) + "\n" + state(job), () -> pickJob(job));
-            chip.setSelected(on);
-            chip.setBackground(a.background(on ? a.palette.highlight : a.palette.surface, 12, true));
-            chip.setTextColor(on ? a.palette.highlightText : a.palette.text);
-            chip.setContentDescription(log.jobName(job) + ", " + state(job) + (on ? ", selected" : ""));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
-            params.setMarginEnd(a.dp(8));
-            row.addView(chip, params);
-        }
-        row.addView(a.button("Jobs…", this::manageJobs));
-        scroll.addView(row);
-        bar.addView(a.label("Jobs"));
-        bar.addView(scroll);
-        return bar;
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int selected = log.selected;
+        Button drop = a.button(log.jobName(selected) + " · " + state(selected) + "  \u25BE", null);
+        drop.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        drop.setBackground(a.background(a.palette.surface, 12, true));
+        drop.setTextColor(a.palette.text);
+        drop.setTypeface(null, Typeface.BOLD);
+        drop.setContentDescription("Job: " + log.jobName(selected) + ", " + state(selected) + ". Tap to change job");
+        drop.setOnClickListener(v -> {
+            PopupMenu menu = new PopupMenu(a, v);
+            for (int job : log.activeJobs()) {
+                menu.getMenu().add(0, job, 0, log.jobName(job) + " · " + state(job)).setCheckable(true).setChecked(job == selected);
+            }
+            menu.getMenu().setGroupCheckable(0, true, true);
+            menu.setOnMenuItemClickListener(item -> { pickJob(item.getItemId()); return true; });
+            menu.show();
+        });
+        row.addView(drop, new LinearLayout.LayoutParams(0, -2, 1));
+        Button manage = a.button("Jobs…", this::manageJobs);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+        params.setMarginStart(a.dp(8));
+        row.addView(manage, params);
+        return row;
     }
 
     /** Chooses the job the toggles act on; nothing is punched in or out, and nothing is written. */
     private void pickJob(int job) {
+        if (job == log.selected) return;
         chosenJob = job;
         log.selected = job;
         a.rerender();
