@@ -394,6 +394,60 @@ final class WorkLog {
         openWork = null;
     }
 
+    /**
+     * The period of the same kind and job whose edge meets this one's start or end, so the two can merge;
+     * productive and break time must also share their work period. Null if none meets it.
+     */
+    Period touching(LocalDate day, Period period, boolean start) {
+        if (!start && period.open()) return null;
+        long edge = start ? period.start : period.end;
+        Period parent = period.kind == Kind.WORK ? null : parent(day, period);
+        for (Period other : periods(day)) {
+            if (other == period || other.kind != period.kind || other.job != period.job) continue;
+            boolean meets = start ? !other.open() && other.end == edge : other.start == edge;
+            if (meets && (period.kind == Kind.WORK || parent(day, other) == parent)) return other;
+        }
+        return null;
+    }
+
+    /** Joins two touching periods into the earlier one; merged work holds what both held. */
+    Period merge(LocalDate day, Period a, Period b) {
+        Period first = a.start <= b.start ? a : b, second = first == a ? b : a;
+        List<Period> periods = days.get(day);
+        if (periods == null || !periods.contains(first) || !periods.contains(second) || first.kind != second.kind
+                || first.job != second.job || first.open() || first.end != second.start
+                || (first.kind != Kind.WORK && parent(day, first) != parent(day, second))) {
+            throw new IllegalArgumentException("Only touching periods of the same kind can merge");
+        }
+        first.end = second.end;
+        periods.remove(second);
+        dirty.add(day);
+        openWork = null;
+        return first;
+    }
+
+    /**
+     * Cuts a period in two at a time inside it and returns the later part. Cutting work also cuts the productive
+     * or break time it crosses, so each part keeps what lies inside it.
+     */
+    Period split(LocalDate day, Period period, long at, long now) {
+        if (at - period.start < MIN_LENGTH || period.end(now) - at < MIN_LENGTH) {
+            throw new IllegalArgumentException("Cut at least a minute from either end");
+        }
+        List<Period> pieces = new ArrayList<>(Collections.singletonList(period));
+        if (period.kind == Kind.WORK) {
+            for (Period child : children(day, period)) if (child.start < at && at < child.end(now)) pieces.add(child);
+        }
+        Period later = null;
+        for (Period piece : pieces) {
+            Period rest = new Period(piece.kind, at, piece.end, piece.job);
+            piece.end = at;
+            add(day, rest);
+            if (piece == period) later = rest;
+        }
+        return later;
+    }
+
     /** Moves a work period, with what it contains, to another job; refused if it would overlap that job's work. */
     void setJob(LocalDate day, Period work, int job, long now) {
         if (work.kind != Kind.WORK || work.job == job || !jobs.containsKey(job)) return;

@@ -64,7 +64,8 @@ public final class WorkDayActivity extends BaseActivity {
         scroll.setFillViewport(true);
         scroll.setPadding(dp(12), 0, dp(20), 0);
         candle = new Candle(this);
-        candle.setContentDescription("Timeline of this day. Tap a candle for its details; drag or tap a handle to change a time.");
+        candle.setContentDescription("Timeline of this day. Tap a candle for its details; drag or tap a handle to change a time; "
+                + "hold a handle on its neighbour's to merge them; swipe sideways across a candle to cut it in two.");
         scroll.addView(candle);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout actions = new LinearLayout(this);
@@ -298,8 +299,9 @@ public final class WorkDayActivity extends BaseActivity {
     }
 
     /**
-     * Three candle columns on a time axis: work, productive (over unproductive work time) and breaks. Dragging a handle moves its edge in five-minute steps; tapping a
-     * handle opens the time picker; tapping a bar opens its options.
+     * Three candle columns on a time axis: work, productive (over unproductive work time) and breaks. Dragging a
+     * handle moves its edge in five-minute steps, and holding it on a neighbour's handle merges the two; tapping a
+     * handle opens the time picker; tapping a candle opens its details; swiping across a candle cuts it in two.
      */
     private final class Candle extends View {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
@@ -313,9 +315,12 @@ public final class WorkDayActivity extends BaseActivity {
         private Handle active;
         private List<Integer> lanes = java.util.Collections.singletonList(WorkLog.FIRST_JOB);
         private WorkLog.Period tapped;
-        private float downY;
-        private boolean moved;
+        private float downX, downY, swipeX;
+        private boolean moved, swiping, done;
         private float hourHeight;
+        /** While a dragged handle rests on a neighbour's, the neighbour it will merge with after a short hold. */
+        private WorkLog.Period mergeWith;
+        private final Runnable merge = this::mergeHeld;
 
         Candle(Context context) {
             super(context);
@@ -373,6 +378,7 @@ public final class WorkDayActivity extends BaseActivity {
         private long seconds(float y) { return rangeStart + Math.round((y - top()) / hourHeight * 3600); }
 
         private static final int COLUMNS = 3;
+        private static final long MERGE_HOLD_MS = 600;
         private final String[] titles = {"Work", "Productive", "Break"};
 
         private float axis() { return dp(56); }
@@ -444,7 +450,17 @@ public final class WorkDayActivity extends BaseActivity {
             }
             // Handles are one solid colour; an overlapping one gets a ring in its candle's outline shade.
             float r = handleRadius();
+            if (swiping) {
+                stroke.setColor(palette.text); stroke.setStrokeWidth(dp(2));
+                canvas.drawLine(downX, downY, swipeX, downY, stroke);
+            }
             for (Handle handle : handles) {
+                // The handles about to merge get a highlight ring while the hold runs.
+                if (mergeWith != null && active != null && (handle.period == mergeWith || handle.period == active.period)
+                        && Math.abs(handle.y - y(active.start ? active.period.start : active.period.end)) < 1) {
+                    stroke.setColor(palette.highlight); stroke.setStrokeWidth(dp(3));
+                    canvas.drawCircle(handle.x, handle.y, r + dp(7), stroke);
+                }
                 int shade = shades.getOrDefault(handle.period, 0);
                 if (shade != 0) {
                     fill.setColor(outline(shade));
@@ -562,7 +578,8 @@ public final class WorkDayActivity extends BaseActivity {
                 case MotionEvent.ACTION_DOWN -> {
                     active = nearest(x, y);
                     tapped = null;
-                    downY = y; moved = false;
+                    downX = x; downY = y; swipeX = x;
+                    moved = false; swiping = false; done = false;
                     if (active != null) {
                         getParent().requestDisallowInterceptTouchEvent(true);
                     } else {
@@ -570,22 +587,39 @@ public final class WorkDayActivity extends BaseActivity {
                             if (bars.get(i).contains(x, y)) { tapped = barPeriods.get(i); break; }
                         }
                     }
-                    return active != null || tapped != null;
+                    // Taken even off the candles, so a swipe can start beside the one it cuts.
+                    return true;
                 }
                 case MotionEvent.ACTION_MOVE -> {
-                    if (Math.abs(y - downY) > slop) moved = true;
+                    if (done) return true;
+                    float dx = Math.abs(x - downX), dy = Math.abs(y - downY);
+                    if (dx > slop || dy > slop) moved = true;
                     if (active != null && moved) {
                         long to = WorkLog.snap(Math.max(rangeStart, Math.min(rangeEnd, seconds(y))));
                         log.move(day, active.period, active.start, to, now(), zone());
+                        holdMerge(log.touching(day, active.period, active.start));
+                        invalidate();
+                    } else if (active == null && (swiping || dx > slop && dx > dy * 2)) {
+                        // A sideways swipe; vertical drags are left to the scroll view.
+                        swiping = true;
+                        swipeX = x;
+                        getParent().requestDisallowInterceptTouchEvent(true);
                         invalidate();
                     }
                     return true;
                 }
                 case MotionEvent.ACTION_UP -> {
-                    if (active != null) {
+                    holdMerge(null);
+                    if (done) {
+                        done = false;
+                    } else if (active != null) {
                         Handle handle = active;
                         active = null;
                         if (moved) save(); else pickTime(handle.period, handle.start);
+                    } else if (swiping) {
+                        swiping = false;
+                        cut(Math.min(downX, x), Math.max(downX, x), downY);
+                        invalidate();
                     } else if (tapped != null && !moved) {
                         performClick();
                         details(tapped);
@@ -594,15 +628,63 @@ public final class WorkDayActivity extends BaseActivity {
                     return true;
                 }
                 case MotionEvent.ACTION_CANCEL -> {
-                    if (active != null && moved) save();
-                    active = null; tapped = null;
+                    holdMerge(null);
+                    if (active != null && moved && !done) save();
+                    active = null; tapped = null; swiping = false; done = false;
+                    invalidate();
                     return true;
                 }
                 default -> { return super.onTouchEvent(event); }
             }
         }
 
+        /** Starts, keeps or cancels the hold that merges the dragged period with the one its handle rests on. */
+        private void holdMerge(WorkLog.Period target) {
+            if (target == mergeWith) return;
+            removeCallbacks(merge);
+            mergeWith = target;
+            if (target != null) postDelayed(merge, MERGE_HOLD_MS);
+        }
+
+        private void mergeHeld() {
+            if (active == null || mergeWith == null) return;
+            WorkLog.Period merged;
+            try { merged = log.merge(day, active.period, mergeWith); }
+            catch (IllegalArgumentException e) { message(e.getMessage()); return; }
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            // The rest of this touch does nothing more; lifting the finger just ends it.
+            active = null; mergeWith = null; done = true;
+            save();
+            Toast.makeText(getContext(), "Merged into " + name(merged).toLowerCase() + " " + range(merged), Toast.LENGTH_SHORT).show();
+        }
+
+        /**
+         * Cuts the candle a sideways swipe crossed at the swipe's height. Work wins when the swipe crosses
+         * several, since cutting work also cuts what is inside it.
+         */
+        private void cut(float from, float to, float y) {
+            WorkLog.Period target = null;
+            for (int i = 0; i < bars.size(); i++) {
+                RectF bar = bars.get(i);
+                if (y <= bar.top || y >= bar.bottom || from > bar.centerX() || to < bar.centerX()) continue;
+                WorkLog.Period period = barPeriods.get(i);
+                if (target == null || period.kind == WorkLog.Kind.WORK && target.kind != WorkLog.Kind.WORK) target = period;
+            }
+            if (target == null) return;
+            long at = WorkLog.snap(seconds(y));
+            try { log.split(day, target, at, now()); }
+            catch (IllegalArgumentException e) { message(e.getMessage()); return; }
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            save();
+            Toast.makeText(getContext(), "Cut " + name(target).toLowerCase() + " at " + clock(at), Toast.LENGTH_SHORT).show();
+        }
+
         @Override public boolean performClick() { return super.performClick(); }
+
+        @Override protected void onDetachedFromWindow() {
+            removeCallbacks(merge);
+            super.onDetachedFromWindow();
+        }
 
         private Handle nearest(float x, float y) {
             Handle best = null;
