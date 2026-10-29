@@ -33,8 +33,8 @@ public final class WorkDayActivity extends BaseActivity {
     private WorkLog log;
     private Candle candle;
     private TextView summary;
-    private LinearLayout rows;
-    private DateTimeFormatter time;
+    /** The user's time format, and the same without AM/PM for narrow candles. */
+    private DateTimeFormatter time, compact;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -49,35 +49,42 @@ public final class WorkDayActivity extends BaseActivity {
 
     private void render() {
         time = timeFormat();
+        compact = DateTimeFormatter.ofPattern(timePattern().replace("a", "").trim());
         LinearLayout root = column();
         root.addView(header(day.format(DateTimeFormatter.ofPattern("EEEE, MMM d")), button("Done", this::finish)));
+        LinearLayout top = column();
+        top.setPadding(dp(20), 0, dp(20), 0);
+        summary = text("", 14, palette.secondary);
+        summary.setPadding(dp(4), 0, dp(4), dp(6));
+        top.addView(summary);
+        top.addView(legend());
+        root.addView(top);
+        // The graph takes all the room left between the totals and the buttons, and scrolls when it needs more.
         ScrollView scroll = new ScrollView(this);
-        LinearLayout content = column();
-        content.setPadding(dp(20), 0, dp(20), dp(24));
-        scroll.addView(content);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-
-        summary = text("", 15, palette.secondary);
-        summary.setPadding(dp(4), 0, dp(4), dp(8));
-        content.addView(summary);
-        content.addView(legend());
+        scroll.setFillViewport(true);
+        scroll.setPadding(dp(12), 0, dp(20), 0);
         candle = new Candle(this);
-        candle.setContentDescription("Timeline of this day. Use the list of periods below to change times.");
-        content.addView(candle, new LinearLayout.LayoutParams(-1, -2));
-        content.addView(button("Add work period", this::addWork), spaced(12));
-        content.addView(button("Add productive time", () -> addInside(WorkLog.Kind.PRODUCTIVE)), spaced(8));
-        content.addView(button("Add lunch/break", () -> addInside(WorkLog.Kind.BREAK)), spaced(8));
-        content.addView(label("Periods"));
-        rows = column();
-        content.addView(rows);
+        candle.setContentDescription("Timeline of this day. Tap a candle for its details; drag or tap a handle to change a time.");
+        scroll.addView(candle);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout actions = new LinearLayout(this);
+        actions.setPadding(dp(20), dp(8), dp(20), dp(16));
+        addAction(actions, "+ Work", "Add work period", this::addWork);
+        addAction(actions, "+ Productive", "Add productive time", () -> addInside(WorkLog.Kind.PRODUCTIVE));
+        addAction(actions, "+ Break", "Add lunch or break", () -> addInside(WorkLog.Kind.BREAK));
+        root.addView(actions);
         install(root);
         refresh();
     }
 
-    private LinearLayout.LayoutParams spaced(int top) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(top);
-        return params;
+    private void addAction(LinearLayout row, String value, String description, Runnable click) {
+        Button action = button(value, click);
+        action.setSingleLine(true);
+        action.setPadding(dp(4), dp(8), dp(4), dp(8));
+        action.setContentDescription(description);
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1);
+        if (row.getChildCount() > 0) cell.setMarginStart(dp(8));
+        row.addView(action, cell);
     }
 
     private LinearLayout legend() {
@@ -103,32 +110,19 @@ public final class WorkDayActivity extends BaseActivity {
 
     private int breakColour() { return ColourMath.blend(palette.surface, palette.secondary, .45); }
 
-    /** Updates the totals and the period list, and redraws the graph. */
+    /** Updates the totals and redraws the graph. */
     private void refresh() {
-        long now = now();
-        WorkLog.Totals totals = log.totals(day, now);
+        WorkLog.Totals totals = log.totals(day, now());
         summary.setText(totals.punched == 0 ? "No work recorded. Add a work period to start."
                 : "Worked " + WorkCsv.clock(totals.worked()) + " · Productive " + WorkCsv.clock(totals.productive)
                 + " · Unproductive " + WorkCsv.clock(totals.unproductive()) + " · Break " + WorkCsv.clock(totals.breaks));
-        rows.removeAllViews();
-        for (WorkLog.Period period : log.periods(day)) {
-            boolean child = period.kind != WorkLog.Kind.WORK;
-            Button row = button(name(period) + (log.jobs.size() > 1 ? " · " + log.jobName(period.job) : "") + " · " + range(period, now)
-                    + " (" + WorkCsv.clock(period.length(now)) + ")", () -> options(period));
-            row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
-            row.setBackground(background(child ? palette.surface : palette.button, 12, child));
-            row.setTextColor(child ? palette.text : palette.buttonText);
-            LinearLayout.LayoutParams params = spaced(8);
-            params.setMarginStart(child ? dp(24) : 0);
-            rows.addView(row, params);
-        }
         candle.requestLayout();
         candle.invalidate();
     }
 
     private String name(WorkLog.Period period) { return KIND_NAMES[period.kind.ordinal()]; }
 
-    private String range(WorkLog.Period period, long now) {
+    private String range(WorkLog.Period period) {
         return clock(period.start) + "–" + (period.open() ? "now" : clock(period.end));
     }
 
@@ -142,25 +136,88 @@ public final class WorkDayActivity extends BaseActivity {
         refresh();
     }
 
-    // ---- Editing ----
+    // ---- Details ----
 
-    private void options(WorkLog.Period period) {
-        List<String> items = new ArrayList<>(java.util.Collections.singletonList("Change start"));
-        if (!period.open()) items.add("Change end");
-        if (period.kind == WorkLog.Kind.WORK && log.activeJobs().size() > 1) items.add("Change job");
-        items.add("Delete");
-        new AlertDialog.Builder(this).setTitle(name(period) + " · " + range(period, now()))
-                .setItems(items.toArray(new String[0]), (dialog, which) -> {
-                    String item = items.get(which);
-                    if (item.equals("Change start")) pickTime(period, true);
-                    else if (item.equals("Change end")) pickTime(period, false);
-                    else if (item.equals("Change job")) pickJob("Job for this work", period.job, job -> {
-                        try { log.setJob(day, period, job, now()); save(); }
-                        catch (IllegalArgumentException e) { message(e.getMessage()); }
-                    });
-                    else confirmDelete(period);
-                }).setNegativeButton("Cancel", null).show();
+    /**
+     * Everything about one period: its job, start and end with their dates, its length and, for work, the time
+     * inside it. Start and end change from here too; each child opens its own details.
+     */
+    private void details(WorkLog.Period period) {
+        long now = now();
+        LinearLayout box = column();
+        box.setPadding(dp(20), dp(4), dp(20), dp(8));
+        AlertDialog[] shown = new AlertDialog[1];
+        Runnable close = () -> shown[0].dismiss();
+        TextView owner = text(log.jobName(period.job), 15, palette.secondary);
+        owner.setPadding(0, 0, 0, dp(8));
+        box.addView(owner);
+        box.addView(detail("Start", clock(period.start), date(period.start), "Change", () -> { close.run(); pickTime(period, true); }));
+        if (period.open()) box.addView(detail("End", "Running", "Running for " + WorkCsv.clock(period.length(now)), null, null));
+        else box.addView(detail("End", clock(period.end), date(period.end), "Change", () -> { close.run(); pickTime(period, false); }));
+        box.addView(detail("Length", WorkCsv.clock(period.length(now)), null, null, null));
+        if (period.kind == WorkLog.Kind.WORK) {
+            List<WorkLog.Period> children = log.children(day, period);
+            long productive = 0, breaks = 0;
+            for (WorkLog.Period child : children) {
+                if (child.kind == WorkLog.Kind.BREAK) breaks += child.length(now); else productive += child.length(now);
+            }
+            long worked = period.length(now) - breaks;
+            box.addView(detail("Worked", WorkCsv.clock(worked), "Productive " + WorkCsv.clock(productive)
+                    + " · Unproductive " + WorkCsv.clock(worked - productive) + " · Break " + WorkCsv.clock(breaks), null, null));
+            if (!children.isEmpty()) box.addView(label("Inside this work"));
+            for (WorkLog.Period child : children) {
+                Button row = button(name(child) + " · " + range(child) + " (" + WorkCsv.clock(child.length(now)) + ")",
+                        () -> { close.run(); details(child); });
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
+                row.setBackground(background(palette.surface, 12, true));
+                row.setTextColor(palette.text);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+                params.topMargin = dp(6);
+                box.addView(row, params);
+            }
+        } else {
+            WorkLog.Period parent = log.parent(day, period);
+            if (parent != null) box.addView(detail("Within", range(parent), "Work for " + log.jobName(parent.job), "Open",
+                    () -> { close.run(); details(parent); }));
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(name(period) + " · " + WorkLog.shortName(log.jobName(period.job))).setView(scroll)
+                .setNegativeButton("Close", null)
+                .setNeutralButton("Delete", (dialog, which) -> confirmDelete(period));
+        if (period.kind == WorkLog.Kind.WORK && log.activeJobs().size() > 1) {
+            builder.setPositiveButton("Change job", (dialog, which) -> pickJob("Job for this work", period.job, chosen -> {
+                try { log.setJob(day, period, chosen, now()); save(); }
+                catch (IllegalArgumentException e) { message(e.getMessage()); }
+            }));
+        }
+        shown[0] = builder.show();
     }
+
+    /** A labelled value with an optional note under it and an optional action beside it. */
+    private LinearLayout detail(String name, String value, String note, String action, Runnable click) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        TextView key = text(name, 13, palette.secondary);
+        row.addView(key, new LinearLayout.LayoutParams(dp(72), -2));
+        LinearLayout values = column();
+        TextView main = text(value, 17, palette.text);
+        main.setTypeface(null, android.graphics.Typeface.BOLD);
+        values.addView(main);
+        if (note != null) values.addView(text(note, 13, palette.secondary));
+        row.addView(values, new LinearLayout.LayoutParams(0, -2, 1));
+        if (action != null) {
+            Button change = button(action, click);
+            change.setMinHeight(dp(40)); change.setMinimumHeight(dp(40));
+            change.setPadding(dp(12), dp(4), dp(12), dp(4));
+            row.addView(change);
+        }
+        return row;
+    }
+
+    private String date(long seconds) { return local(seconds).format(DateTimeFormatter.ofPattern("EEEE, MMM d")); }
 
     private void confirmDelete(WorkLog.Period period) {
         String message = period.kind == WorkLog.Kind.WORK
@@ -213,7 +270,7 @@ public final class WorkDayActivity extends BaseActivity {
         if (work.isEmpty()) { message("Add a work period first"); return; }
         if (work.size() == 1) { addInside(work.get(0), kind); return; }
         String[] names = new String[work.size()];
-        for (int i = 0; i < names.length; i++) names[i] = log.jobName(work.get(i).job) + " · " + range(work.get(i), now());
+        for (int i = 0; i < names.length; i++) names[i] = log.jobName(work.get(i).job) + " · " + range(work.get(i));
         new AlertDialog.Builder(this).setTitle("Add to which work period?")
                 .setItems(names, (dialog, which) -> addInside(work.get(which), kind))
                 .setNegativeButton("Cancel", null).show();
@@ -258,6 +315,7 @@ public final class WorkDayActivity extends BaseActivity {
         private WorkLog.Period tapped;
         private float downY;
         private boolean moved;
+        private float hourHeight;
 
         Candle(Context context) {
             super(context);
@@ -265,8 +323,10 @@ public final class WorkDayActivity extends BaseActivity {
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         }
 
-        private float hourHeight() { return dp(60); }
         private float top() { return dp(30); }
+
+        /** Tall enough for a candle's start, short name and end, with the handles clear of the text. */
+        private float minCandle() { return dp(64); }
 
         /** Whole hours around the recorded periods, at least eight; 8:00–18:00 on an empty day. */
         private void computeRange() {
@@ -284,15 +344,33 @@ public final class WorkDayActivity extends BaseActivity {
         }
 
         @Override protected void onMeasure(int widthSpec, int heightSpec) {
-            // The range stays fixed while a handle is being dragged.
-            if (active == null) computeRange();
-            int height = Math.round(top() * 2 + (rangeEnd - rangeStart) / 3600f * hourHeight());
+            // The range and scale stay fixed while a handle is being dragged.
+            float hours = (rangeEnd - rangeStart) / 3600f;
+            if (active == null) {
+                computeRange();
+                hours = (rangeEnd - rangeStart) / 3600f;
+                // Hours stretch so the shortest finished period can show its times and name, within reason;
+                // anything shorter still is drawn at the minimum size.
+                long shortest = Long.MAX_VALUE;
+                for (WorkLog.Period period : log.periods(day)) {
+                    if (!period.open() && period.length(0) > 0) shortest = Math.min(shortest, period.length(0));
+                }
+                float scale = shortest == Long.MAX_VALUE ? dp(60) : minCandle() * 3600f / shortest;
+                hourHeight = Math.max(dp(60), Math.min(dp(160), scale));
+                // Fill the screen when the day is short.
+                int room = MeasureSpec.getSize(heightSpec);
+                if (MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY) {
+                    hourHeight = Math.max(hourHeight, (room - top() * 2) / hours);
+                }
+            }
+            int height = Math.round(top() * 2 + hours * hourHeight);
+            if (MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY) height = Math.max(height, MeasureSpec.getSize(heightSpec));
             setMeasuredDimension(MeasureSpec.getSize(widthSpec), height);
         }
 
-        private float y(long seconds) { return top() + (seconds - rangeStart) / 3600f * hourHeight(); }
+        private float y(long seconds) { return top() + (seconds - rangeStart) / 3600f * hourHeight; }
 
-        private long seconds(float y) { return rangeStart + Math.round((y - top()) / hourHeight() * 3600); }
+        private long seconds(float y) { return rangeStart + Math.round((y - top()) / hourHeight * 3600); }
 
         private static final int COLUMNS = 3;
         private final String[] titles = {"Work", "Productive", "Break"};
@@ -358,15 +436,7 @@ public final class WorkDayActivity extends BaseActivity {
                 int shade = shades.getOrDefault(period, 0);
                 stroke.setColor(outline(shade)); stroke.setStrokeWidth(dp(shade == 0 ? 1 : 2));
                 canvas.drawRoundRect(bars.get(i), radius, radius, stroke);
-                // Work candles carry their job's name when there is more than one job and room for it.
-                if (period.kind == WorkLog.Kind.WORK && log.jobs.size() > 1 && bars.get(i).height() > dp(40)) {
-                    jobLabel.setColor(palette.buttonText);
-                    jobLabel.setTextSize(dp(11));
-                    jobLabel.setTextAlign(Paint.Align.CENTER);
-                    String name = android.text.TextUtils.ellipsize(log.jobName(period.job), new android.text.TextPaint(jobLabel),
-                            bars.get(i).width() - dp(8), android.text.TextUtils.TruncateAt.END).toString();
-                    canvas.drawText(name, bars.get(i).centerX(), bars.get(i).top + dp(26), jobLabel);
-                }
+                labels(canvas, bars.get(i), period, now);
             }
             if (log.periods(day).stream().anyMatch(WorkLog.Period::open) && now >= rangeStart && now <= rangeEnd) {
                 stroke.setColor(palette.text); stroke.setStrokeWidth(dp(1.5f));
@@ -387,6 +457,38 @@ public final class WorkDayActivity extends BaseActivity {
             }
         }
 
+        /** The start at the top of a candle, the job's short name in the middle and the end at the bottom. */
+        private void labels(Canvas canvas, RectF bar, WorkLog.Period period, long now) {
+            jobLabel.setColor(period.kind == WorkLog.Kind.WORK ? palette.buttonText
+                    : period.kind == WorkLog.Kind.PRODUCTIVE ? palette.highlightText : palette.text);
+            jobLabel.setTextAlign(Paint.Align.CENTER);
+            float width = bar.width() - dp(4), inset = handleRadius() + dp(2);
+            String end = period.open() ? "now" : clock(period.end);
+            String endShort = period.open() ? "now" : local(period.end).format(compact);
+            fit(canvas, clock(period.start), local(period.start).format(compact), bar.centerX(), bar.top + inset, width, -1);
+            fit(canvas, WorkLog.shortName(log.jobName(period.job)), null, bar.centerX(), bar.centerY(), width, 0);
+            fit(canvas, end, endShort, bar.centerX(), bar.bottom - inset, width, 1);
+        }
+
+        /**
+         * Draws text centred on x, hanging below y (-1), centred on it (0) or resting above it (1). It shrinks to
+         * fit the width, then tries the shorter form; text that still does not fit is left out.
+         */
+        private void fit(Canvas canvas, String text, String shorter, float x, float y, float width, int place) {
+            for (String candidate : shorter == null ? new String[]{text} : new String[]{text, shorter}) {
+                for (int size = 12; size >= 9; size--) {
+                    jobLabel.setTextSize(dp(size));
+                    jobLabel.setFakeBoldText(place == 0);
+                    if (jobLabel.measureText(candidate) > width) continue;
+                    Paint.FontMetrics metrics = jobLabel.getFontMetrics();
+                    float baseline = place < 0 ? y - metrics.ascent : place > 0 ? y - metrics.descent
+                            : y - (metrics.ascent + metrics.descent) / 2;
+                    canvas.drawText(candidate, x, baseline, jobLabel);
+                    return;
+                }
+            }
+        }
+
         /** Unproductive time in the productive column. */
         private void track(Canvas canvas, long from, long to, int job) {
             if (to <= from) return;
@@ -400,7 +502,7 @@ public final class WorkDayActivity extends BaseActivity {
         /** Records a candle and its handles, centred on the candle; a running period has no end handle. */
         private void candle(WorkLog.Period period, int column, long now) {
             float left = lane(column, period.job), top = y(period.start);
-            float bottom = Math.max(y(period.end(now)), top + dp(2));
+            float bottom = Math.max(y(period.end(now)), top + minCandle());
             bars.add(new RectF(left, top, left + laneWidth(), bottom));
             barPeriods.add(period);
             float centre = left + laneWidth() / 2;
@@ -486,7 +588,7 @@ public final class WorkDayActivity extends BaseActivity {
                         if (moved) save(); else pickTime(handle.period, handle.start);
                     } else if (tapped != null && !moved) {
                         performClick();
-                        options(tapped);
+                        details(tapped);
                     }
                     tapped = null;
                     return true;

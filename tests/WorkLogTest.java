@@ -22,6 +22,7 @@ public final class WorkLogTest {
         csv();
         jobs();
         reviewFixes();
+        shortNames();
         System.out.println("PASS: " + assertions + " work log assertions");
     }
 
@@ -325,6 +326,16 @@ public final class WorkLogTest {
     private static long at(String time) { return Instant.parse("2026-10-28T" + time + ":00Z").getEpochSecond(); }
     private static long hours(long h) { return h * 3600; }
     private static long minutes(long m) { return m * 60; }
+    private static void shortNames() {
+        check(WorkLog.shortName("United Postal Service").equals("UPS"), "Initials of each word");
+        check(WorkLog.shortName("Main job").equals("MJ"), "Two words, two letters");
+        check(WorkLog.shortName("Cafe, evenings").equals("CE"), "Punctuation separates words");
+        check(WorkLog.shortName("Cafe").equals("CAFE") && WorkLog.shortName("Warehouse").equals("WAR"),
+                "One short word is kept whole; a long one gives three letters");
+        check(WorkLog.shortName("Bank of the West Coast").equals("BOTW"), "At most four letters");
+        check(WorkLog.shortName("Store 42").equals("S4") && WorkLog.shortName("--").equals("?"), "Digits count; no letters gives ?");
+    }
+
     private static void check(boolean condition, String message) {
         assertions++; if (!condition) throw new AssertionError(message);
     }

@@ -282,7 +282,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
             Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
             check(dayView != null, "A calendar day opens the day view"); waitForIdleSync();
-            await(() -> findText(dayView, "Add work period") != null, "Day view renders its candle graph and controls");
+            await(() -> findText(dayView, "+ Work") != null && findText(dayView, "+ Break") != null,
+                    "Day view renders its candle graph and one row of add buttons");
             screenshot("smoke-day.png"); ui(dayView::finish); waitForIdleSync();
             ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,

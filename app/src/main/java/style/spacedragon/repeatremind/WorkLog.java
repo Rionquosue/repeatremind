@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -127,6 +128,24 @@ final class WorkLog {
         if (trimmed.isEmpty()) throw new IllegalArgumentException("Enter a job name");
         if (trimmed.length() > 60) throw new IllegalArgumentException("Use 60 characters or fewer");
         return trimmed;
+    }
+
+    /**
+     * A few capitals for a job's name: the first letter of each word ("United Postal Service" is UPS), up to four;
+     * a single word of four letters or fewer is kept whole, a longer one gives its first three.
+     */
+    static String shortName(String name) {
+        List<String> words = new ArrayList<>();
+        for (String word : name.split("[^\\p{L}\\p{N}]+")) if (!word.isEmpty()) words.add(word);
+        if (words.isEmpty()) return "?";
+        if (words.size() == 1) {
+            String word = words.get(0);
+            int letters = word.codePointCount(0, word.length());
+            return (letters <= 4 ? word : word.substring(0, word.offsetByCodePoints(0, 3))).toUpperCase(Locale.ROOT);
+        }
+        StringBuilder initials = new StringBuilder();
+        for (int i = 0; i < words.size() && i < 4; i++) initials.appendCodePoint(words.get(i).codePointAt(0));
+        return initials.toString().toUpperCase(Locale.ROOT);
     }
 
     /** One job per line: id, archived flag (0 or 1) and name, separated by '|'. */
