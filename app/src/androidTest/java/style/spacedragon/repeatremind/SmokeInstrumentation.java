@@ -284,6 +284,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(dayView != null, "A calendar day opens the day view"); waitForIdleSync();
             await(() -> findText(dayView, "+ Work") != null && findText(dayView, "+ Break") != null,
                     "Day view renders its candle graph and one row of add buttons");
+            await(dayView::hasWindowFocus, "Day view is in front");
             screenshot("smoke-day.png"); ui(dayView::finish); waitForIdleSync();
             ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,
