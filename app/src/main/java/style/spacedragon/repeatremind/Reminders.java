@@ -185,7 +185,8 @@ final class Reminders {
         DateTimeFormatter time = DateTimeFormatter.ofPattern(BaseActivity.timePattern(context));
         String text = WorkText.plan(work, shift, zone, time);
         Intent intent = new Intent(context, MainActivity.class)
-                .putExtra("tab", MainActivity.WORK_TAB).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                .putExtra("room", MainActivity.WORK).putExtra("work_room", WorkRoom.SCHEDULE)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open = PendingIntent.getActivity(context, WORK_NOTIFICATION, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         long untilStart = shift.startAt.toEpochMilli() - System.currentTimeMillis();

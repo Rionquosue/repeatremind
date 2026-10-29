@@ -7,6 +7,9 @@ Android cloud backup and device transfer are disabled.
 
 ## Use
 
+The app has three rooms, switched with the icon bar at the bottom: **Reminders**, **Missed days** and
+**Work tracker**.
+
 - Tap **+** to add a task. An empty list shows only an arrow and the add button below the header.
 - Choose every day, selected weekdays, weekly, bi-weekly, monthly, or yearly.
 - Weekly repeats from the start date. Strict biweekly repeats every **14 local calendar days**
@@ -43,9 +46,39 @@ Android cloud backup and device transfer are disabled.
 - **Temporary task** runs for a set number of days, weeks, months or years counted from the start
   date, then disables itself. The list shows its last day and then **Ended**. Missed days stop at
   the last day. To run it again, lengthen it or move the start date, then re-enable it.
-- The **Workdays** tab sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
+- **Work tracker → Tracker** has three toggles for the selected job that highlight while on:
+  **Punch in/out**, **Start/stop productive** and **Start/stop lunch/break**. You switch every toggle
+  yourself: productive time and breaks need that job to be punched in, and each is unavailable (shown
+  dimmed) while the other runs for that job. Punching out of a job also ends that job's productive or break
+  time, which cannot outlast it. Today's worked, productive, unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
+  nothing is written on a timer. A shift past midnight stays on the day it started.
+- **Jobs:** the row above the toggles holds your jobs, each showing whether it is off, punched in,
+  productive or on break. Tap a job to point the toggles at it; nothing is punched in or out for you.
+  Several jobs can be punched in, and productive, at the same time, each with its own timeline. Day totals
+  add each job's own time. **Jobs…** adds or renames jobs. A job with no recorded work is deleted; one with
+  work is archived, so its history and exports keep its name, and can be restored. Choosing a job writes
+  nothing.
+- **Work tracker → Details** is a calendar: each worked day has a circle that grows with the hours
+  worked. Tap a day for its candle graph: work periods in the first column; productive, unproductive
+  and break time in the second. Drag the round handles at the start and end of a period to move it in
+  5-minute steps, or tap a handle to set the exact minute with the system time picker. Within a job,
+  periods never overlap and productive and break time stay inside their work period; jobs that overlap in
+  time get side-by-side lanes in each column. The list below the graph does
+  the same with buttons, and can add or delete periods. Worked time excludes breaks; unproductive time is
+  worked time that was not productive.
+- **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage
+  permission). Choose the dates (the month shown, all recorded days, or a range), one job or all, and a format:
+  - **Daily summary:** one row per day and job: date, weekday, job, first in, last out, punched, break,
+    worked, productive and unproductive hours (decimal), productive %, worked as h:mm, and work periods.
+  - **Every period:** one row per work, productive or break period: date, weekday, job, type, start, end,
+    minutes and hours.
+
+  The file is UTF-8 with a byte-order mark; job names are quoted when needed and never read as formulas.
+  The export screen lists recommended import settings: UTF-8, comma separator, double-quote text
+  delimiter, header row, ISO dates (`YYYY-MM-DD`, times `YYYY-MM-DD HH:MM`), and a dot as the decimal mark.
+- **Work tracker → Schedule** sets up a before-work reminder. Choose a **regular schedule** (e.g. office) and
   select the days you work, or **shift work** (e.g. retail) and enter start and end times for each day;
-  days without times are off. The tab prompts you when no shifts are entered for the next 7 days.
+  days without times are off. It prompts you when no shifts are entered for the next 7 days.
   Shifts can run past midnight and have an optional break inside the shift. Set **Prep time**,
   **Commute time** and how many minutes before prep to be reminded: the reminder goes off at
   shift start − commute − prep − reminder. It fires once per shift and is skipped once the shift starts.
@@ -113,10 +146,13 @@ clock changes, and unchanged recurrence dates for every schedule. `ColourMathTes
 and readable label contrast over a grid of sRGB colours. `ScheduleTest` checks schedule copying,
 validation, list labels, and the date-level recurrence helpers. `WorkdaysTest` checks shift and
 break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
-one delivery per shift, and workday labels. `ReminderStateTest` also covers temporary tasks,
+one delivery per shift, and workday labels. `WorkLogTest` checks the punch clock toggles, totals,
+editing limits and 5-minute snapping, adding and deleting periods, night shifts, jobs (switching, totals
+by job, archiving, storage), and both CSV formats including quoting. `ReminderStateTest` also covers temporary tasks,
 wake-up selection, late completion, clock changes and compact history storage.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
-buttons, weekday highlights, missed-history filtering, custom themes, actual notification actions,
+buttons, weekday highlights, missed-history filtering, the work tracker toggles, calendar and day view,
+custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.
 CI runs these device tests on an Android 15 emulator.
 

@@ -45,6 +45,8 @@ public final class SmokeInstrumentation extends Instrumentation {
         int originalTheme = preferences.getInt("theme", 0);
         int originalNext = preferences.getInt("next_id", 1);
         int[] originalCustom = new TaskStore(context).customColours();
+        SharedPreferences workLog = context.getSharedPreferences("repeatremind_worklog", Context.MODE_PRIVATE);
+        java.util.Map<String, ?> originalWorkLog = new java.util.HashMap<>(workLog.getAll());
         int resultCode = Activity.RESULT_CANCELED;
         try {
             Set<String> permissions = new HashSet<>(Arrays.asList(context.getPackageManager()
@@ -239,6 +241,54 @@ public final class SmokeInstrumentation extends Instrumentation {
                     "Missed tab excludes completed days and current task controls");
             screenshot("smoke-missed.png"); ui(history::finish); waitForIdleSync();
 
+            // Work tracker: toggles, calendar, day view and schedule, through the real activity and store.
+            workLog.edit().clear().commit();
+            Activity tracker = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            waitForIdleSync();
+            ui(() -> findText(tracker, "Work tracker").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch in") != null && findTextStarting(tracker, "Main job · Off") != null,
+                    "Work tracker room shows the punch clock and the job dropdown");
+            check(!findText(tracker, "Start productive").isEnabled() && !findText(tracker, "Start lunch/break").isEnabled(),
+                    "Productive and break wait for punch in");
+            ui(() -> findText(tracker, "Punch in").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch out") != null && findText(tracker, "Start productive").isEnabled()
+                    && findTextStarting(tracker, "Main job · Punched in") != null, "Punch in enables productive time");
+            ui(() -> findText(tracker, "Start productive").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Stop productive") != null, "Productive time starts");
+            check(findText(tracker, "Stop productive").isSelected() && findText(tracker, "Punch out").isSelected(),
+                    "Active toggles are highlighted");
+            check(!findText(tracker, "Start lunch/break").isEnabled(), "A break is unavailable while productive, not switched for you");
+            check(new WorkLogStore(context).load().running(WorkLog.Kind.PRODUCTIVE, WorkLog.FIRST_JOB), "Productive time is stored");
+            ui(() -> findText(tracker, "Stop productive").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Start lunch/break") != null && findText(tracker, "Start lunch/break").isEnabled(),
+                    "Stopping productive time allows a break");
+            ui(() -> findText(tracker, "Start lunch/break").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Stop lunch/break") != null, "A break starts");
+            screenshot("smoke-tracker.png");
+            ui(() -> findText(tracker, "Punch out").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Punch in") != null && findText(tracker, "Start lunch/break") != null
+                    && !new WorkLogStore(context).load().working(), "Punching out stops everything");
+            ui(() -> findText(tracker, "Details").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Export CSV") != null, "Details shows the calendar and export");
+            ActivityMonitor exportMonitor = addMonitor(ExportActivity.class.getName(), null, false);
+            ui(() -> findText(tracker, "Export CSV").performClick());
+            Activity export = waitForMonitorWithTimeout(exportMonitor, 15000); removeMonitor(exportMonitor);
+            check(export != null, "Export CSV opens the export screen"); waitForIdleSync();
+            await(() -> findText(export, "Recommended import settings") != null && findText(export, "Save CSV") != null,
+                    "Export screen shows its options and import settings");
+            screenshot("smoke-export.png"); ui(export::finish); waitForIdleSync();
+            await(tracker::hasWindowFocus, "Work tracker is back in front after export");
+            ActivityMonitor dayMonitor = addMonitor(WorkDayActivity.class.getName(), null, false);
+            ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
+            Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
+            check(dayView != null, "A calendar day opens the day view"); waitForIdleSync();
+            await(() -> findText(dayView, "Add work period") != null, "Day view renders its candle graph and controls");
+            screenshot("smoke-day.png"); ui(dayView::finish); waitForIdleSync();
+            ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
+            await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,
+                    "Schedule sub-room holds the work schedule");
+            ui(tracker::finish); waitForIdleSync();
+
             Activity custom = startActivitySync(new Intent(context, CustomThemeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             int[] colours = {0xff101010, 0xff123456, 0xffab7612, 0xffefefef};
@@ -267,6 +317,9 @@ public final class SmokeInstrumentation extends Instrumentation {
         } finally {
             context.getSystemService(NotificationManager.class).cancelAll();
             new TaskStore(context).customColours(originalCustom);
+            SharedPreferences.Editor restore = workLog.edit().clear();
+            for (var entry : originalWorkLog.entrySet()) restore.putString(entry.getKey(), (String) entry.getValue());
+            restore.commit();
             preferences.edit().putString("tasks", originalTasks).putInt("theme", originalTheme)
                     .putInt("next_id", originalNext).commit();
             Reminders.reconcile(context, false);
@@ -312,6 +365,10 @@ public final class SmokeInstrumentation extends Instrumentation {
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) collect(group.getChildAt(i), all);
         }
+    }
+    private TextView findTextStarting(Activity activity, String prefix) {
+        return flatten(activity).stream().filter(v -> v instanceof TextView)
+                .map(v -> (TextView) v).filter(v -> v.getText().toString().startsWith(prefix)).findFirst().orElse(null);
     }
     private TextView findText(Activity activity, String value) {
         return flatten(activity).stream().filter(v -> v instanceof TextView)
