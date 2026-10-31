@@ -17,6 +17,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -46,6 +47,8 @@ final class WorkRoom {
     private LocalDate clockDay;
     /** A job picked while not punched in; it is saved with the next punch in, not when picked. */
     private int chosenJob;
+    /** The work schedule last rendered with, for punching out work left running past its shift end. */
+    private Workdays schedule;
 
     WorkRoom(MainActivity activity) { a = activity; }
 
@@ -55,15 +58,33 @@ final class WorkRoom {
     /** Reads the log again on the next render, e.g. after another screen may have changed it. */
     void invalidate() { stale = true; }
 
-    /** Updates only the running totals, from the log already in memory: no reload, no rebuilt screen. */
+    /**
+     * Updates only the running totals, from the log already in memory: no reload, no rebuilt screen. Work that
+     * passes its scheduled shift end while on screen is punched out then, and the room is rebuilt.
+     */
     boolean tick() {
         if (clock == null || log == null) return false;
+        List<WorkLog.Period> late = WorkLogStore.punchOutLate(log, schedule);
+        if (!late.isEmpty()) {
+            notePunchedOut(late);
+            save();
+            a.rerender();
+            return false; // Rendering schedules the next tick if anything still runs.
+        }
         fillClock();
         return log.working();
     }
 
+    private void notePunchedOut(List<WorkLog.Period> late) {
+        for (WorkLog.Period work : late) {
+            Toast.makeText(a, "Punched out of " + log.jobName(work.job) + " at " + Instant.ofEpochSecond(work.end)
+                    .atZone(zone()).format(a.timeFormat()) + ", the end of its scheduled shift", Toast.LENGTH_LONG).show();
+        }
+    }
+
     void render(FrameLayout body, int sub, Workdays schedule) {
         clock = null;
+        this.schedule = schedule;
         ScrollView scroll = new ScrollView(a);
         LinearLayout content = a.column();
         content.setPadding(a.dp(20), a.dp(8), a.dp(20), a.dp(24));
@@ -72,8 +93,10 @@ final class WorkRoom {
         // The schedule needs no log, but the bar's job button does.
         if (log == null || stale) {
             try {
-                log = new WorkLogStore(a).load();
+                WorkLogStore store = new WorkLogStore(a);
+                log = store.load();
                 stale = false;
+                notePunchedOut(store.punchedOut);
             } catch (IllegalStateException e) {
                 log = null;
                 if (sub != SCHEDULE) {

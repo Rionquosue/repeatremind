@@ -1,6 +1,7 @@
 package style.spacedragon.repeatremind;
 
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -21,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -40,8 +42,13 @@ public final class WorkDayActivity extends BaseActivity {
         super.onCreate(state);
         try {
             day = LocalDate.parse(getIntent().getStringExtra("date"));
-            log = new WorkLogStore(this).load();
+            WorkLogStore store = new WorkLogStore(this);
+            log = store.load();
             render();
+            for (WorkLog.Period work : store.punchedOut) {
+                Toast.makeText(this, "Punched out of " + log.jobName(work.job) + " at " + clock(work.end)
+                        + ", the end of its scheduled shift", Toast.LENGTH_LONG).show();
+            }
         } catch (RuntimeException e) {
             failOpen("This day could not be opened.");
         }
@@ -152,10 +159,21 @@ public final class WorkDayActivity extends BaseActivity {
         TextView owner = text(log.jobName(period.job), 15, palette.secondary);
         owner.setPadding(0, 0, 0, dp(8));
         box.addView(owner);
-        box.addView(detail("Start", clock(period.start), date(period.start), "Change", () -> { close.run(); pickTime(period, true); }));
-        if (period.open()) box.addView(detail("End", "Running", "Running for " + WorkCsv.clock(period.length(now)), null, null));
-        else box.addView(detail("End", clock(period.end), date(period.end), "Change", () -> { close.run(); pickTime(period, false); }));
-        box.addView(detail("Length", WorkCsv.clock(period.length(now)), null, null, null));
+        // Work can move to another day, or end on the next one; productive and break time follow their work.
+        boolean days = period.kind == WorkLog.Kind.WORK && !period.open();
+        LinearLayout start = detail("Start", clock(period.start), date(period.start));
+        if (days) action(start, "Day", () -> { close.run(); pickDay(period, true); });
+        action(start, "Time", () -> { close.run(); pickTime(period, true); });
+        box.addView(start);
+        if (period.open()) {
+            box.addView(detail("End", "Running", "Running for " + WorkCsv.clock(period.length(now))));
+        } else {
+            LinearLayout end = detail("End", clock(period.end), date(period.end));
+            if (days) action(end, "Day", () -> { close.run(); pickDay(period, false); });
+            action(end, "Time", () -> { close.run(); pickTime(period, false); });
+            box.addView(end);
+        }
+        box.addView(detail("Length", WorkCsv.clock(period.length(now)), null));
         if (period.kind == WorkLog.Kind.WORK) {
             List<WorkLog.Period> children = log.children(day, period);
             long productive = 0, breaks = 0;
@@ -164,7 +182,7 @@ public final class WorkDayActivity extends BaseActivity {
             }
             long worked = period.length(now) - breaks;
             box.addView(detail("Worked", WorkCsv.clock(worked), "Productive " + WorkCsv.clock(productive)
-                    + " · Unproductive " + WorkCsv.clock(worked - productive) + " · Break " + WorkCsv.clock(breaks), null, null));
+                    + " · Unproductive " + WorkCsv.clock(worked - productive) + " · Break " + WorkCsv.clock(breaks)));
             if (!children.isEmpty()) box.addView(label("Inside this work"));
             for (WorkLog.Period child : children) {
                 Button row = button(name(child) + " · " + range(child) + " (" + WorkCsv.clock(child.length(now)) + ")",
@@ -178,8 +196,11 @@ public final class WorkDayActivity extends BaseActivity {
             }
         } else {
             WorkLog.Period parent = log.parent(day, period);
-            if (parent != null) box.addView(detail("Within", range(parent), "Work for " + log.jobName(parent.job), "Open",
-                    () -> { close.run(); details(parent); }));
+            if (parent != null) {
+                LinearLayout within = detail("Within", range(parent), "Work for " + log.jobName(parent.job));
+                action(within, "Open", () -> { close.run(); details(parent); });
+                box.addView(within);
+            }
         }
         ScrollView scroll = new ScrollView(this);
         scroll.addView(box);
@@ -196,26 +217,29 @@ public final class WorkDayActivity extends BaseActivity {
         shown[0] = builder.show();
     }
 
-    /** A labelled value with an optional note under it and an optional action beside it. */
-    private LinearLayout detail(String name, String value, String note, String action, Runnable click) {
+    /** A labelled value with an optional note under it; {@link #action} adds buttons beside it. */
+    private LinearLayout detail(String name, String value, String note) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(6), 0, dp(6));
         TextView key = text(name, 13, palette.secondary);
-        row.addView(key, new LinearLayout.LayoutParams(dp(72), -2));
+        row.addView(key, new LinearLayout.LayoutParams(dp(64), -2));
         LinearLayout values = column();
         TextView main = text(value, 17, palette.text);
         main.setTypeface(null, android.graphics.Typeface.BOLD);
         values.addView(main);
         if (note != null) values.addView(text(note, 13, palette.secondary));
         row.addView(values, new LinearLayout.LayoutParams(0, -2, 1));
-        if (action != null) {
-            Button change = button(action, click);
-            change.setMinHeight(dp(40)); change.setMinimumHeight(dp(40));
-            change.setPadding(dp(12), dp(4), dp(12), dp(4));
-            row.addView(change);
-        }
         return row;
+    }
+
+    private void action(LinearLayout row, String value, Runnable click) {
+        Button change = button(value, click);
+        change.setMinHeight(dp(40)); change.setMinimumHeight(dp(40));
+        change.setPadding(dp(12), dp(4), dp(12), dp(4));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+        params.setMarginStart(dp(6));
+        row.addView(change, params);
     }
 
     private String date(long seconds) { return local(seconds).format(DateTimeFormatter.ofPattern("EEEE, MMM d")); }
@@ -244,6 +268,39 @@ public final class WorkDayActivity extends BaseActivity {
             }
             save();
         }, current.getHour(), current.getMinute(), android.text.format.DateFormat.is24HourFormat(this)).show();
+    }
+
+    /**
+     * Picks the day of a work period's start, which moves the whole period and what it holds, or of its end,
+     * which can be the day it starts or the next.
+     */
+    private void pickDay(WorkLog.Period period, boolean start) {
+        ZonedDateTime current = local(start ? period.start : period.end);
+        DatePickerDialog dialog = new DatePickerDialog(this, (picker, year, month, dayOfMonth) -> {
+            int by = (int) ChronoUnit.DAYS.between(current.toLocalDate(), LocalDate.of(year, month + 1, dayOfMonth));
+            if (by == 0) return;
+            if (start) {
+                try { day = log.moveDays(day, period, by, now(), zone()); }
+                catch (IllegalArgumentException e) { message(e.getMessage()); return; }
+                getIntent().putExtra("date", day.toString());
+                save();
+                render();
+                Toast.makeText(this, "Moved to " + date(period.start), Toast.LENGTH_SHORT).show();
+            } else {
+                long requested = current.plusDays(by).toEpochSecond();
+                long applied = log.move(day, period, false, requested, now(), zone());
+                if (applied != requested) {
+                    Toast.makeText(this, "Adjusted to " + clock(applied) + " to fit the other periods", Toast.LENGTH_LONG).show();
+                }
+                save();
+            }
+        }, current.getYear(), current.getMonthValue() - 1, current.getDayOfMonth());
+        if (!start) {
+            LocalDate first = local(period.start).toLocalDate();
+            dialog.getDatePicker().setMinDate(first.atStartOfDay(zone()).toInstant().toEpochMilli());
+            dialog.getDatePicker().setMaxDate(first.plusDays(2).atStartOfDay(zone()).toInstant().toEpochMilli() - 1);
+        }
+        dialog.show();
     }
 
     private void addWork() {

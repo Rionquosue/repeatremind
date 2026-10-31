@@ -2,6 +2,7 @@ package style.spacedragon.repeatremind;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.NavigableMap;
@@ -98,6 +99,26 @@ final class Workdays {
     Shift shiftOn(LocalDate date) {
         if (mode == Mode.SHIFTS) return shifts.get(date);
         return (weekdays & (1 << (date.getDayOfWeek().getValue() - 1))) != 0 ? regular : null;
+    }
+
+    /** Punching in up to this long before a shift starts counts as working that shift. */
+    static final long EARLY_PUNCH_SECONDS = 4 * 3600;
+
+    /**
+     * When the scheduled shift a punch-in belongs to ends, in epoch seconds: the shift that day, or an overnight
+     * one from the day before, that the punch-in falls in or shortly precedes. 0 when it belongs to none.
+     */
+    long shiftEnd(long punchIn, ZoneId zone) {
+        LocalDate day = Instant.ofEpochSecond(punchIn).atZone(zone).toLocalDate();
+        for (LocalDate date = day.minusDays(1); !date.isAfter(day); date = date.plusDays(1)) {
+            Shift shift = shiftOn(date);
+            if (shift == null) continue;
+            LocalDateTime start = date.atTime(LocalTime.ofSecondOfDay(shift.start * 60L));
+            long from = start.atZone(zone).toEpochSecond();
+            long to = start.plusMinutes(shift.length()).atZone(zone).toEpochSecond();
+            if (punchIn >= from - EARLY_PUNCH_SECONDS && punchIn < to) return to;
+        }
+        return 0;
     }
 
     /** First worked day on or after the date, within a year; null when none is entered. */

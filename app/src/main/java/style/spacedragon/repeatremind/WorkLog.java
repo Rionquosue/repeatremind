@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.LongUnaryOperator;
 
 /**
  * Punch clock: work periods, with productive and break periods inside them. Times are epoch seconds.
@@ -446,6 +447,57 @@ final class WorkLog {
             if (piece == period) later = rest;
         }
         return later;
+    }
+
+    /**
+     * Punches out work left running past the end of its scheduled shift, at that end, as the user would have.
+     * Work with productive or break time started after that end is overtime and keeps running. {@code shiftEnd}
+     * gives the end for a punch-in time, or 0 for none. Returns the work periods it closed.
+     */
+    List<Period> punchOutLate(LongUnaryOperator shiftEnd, long now) {
+        List<Period> closed = new ArrayList<>();
+        for (int job : workingJobs()) {
+            var open = openWork(job);
+            long end = shiftEnd.applyAsLong(open.getValue().start);
+            if (end <= open.getValue().start || now < end) continue;
+            boolean overtime = false;
+            for (Period period : days.get(open.getKey())) {
+                if (period.job == job && period.open() && period.kind != Kind.WORK && period.start >= end) overtime = true;
+            }
+            if (overtime) continue;
+            punchOut(job, end);
+            closed.add(open.getValue());
+        }
+        return closed;
+    }
+
+    /**
+     * Moves a finished work period, with what it holds, by whole days at the same times of day, and returns the
+     * day it now belongs to. Refused while it runs, or where the job already has work.
+     */
+    LocalDate moveDays(LocalDate day, Period work, int by, long now, ZoneId zone) {
+        if (work.kind != Kind.WORK || by == 0) return day;
+        if (work.open()) throw new IllegalArgumentException("Punch out before moving this work to another day");
+        LocalDate target = day.plusDays(by);
+        if (overlap(target, work.job, plusDays(work.start, by, zone), plusDays(work.end, by, zone), work, now) != null) {
+            throw new IllegalArgumentException(jobName(work.job) + " already has work then");
+        }
+        List<Period> moving = children(day, work);
+        moving.add(0, work);
+        List<Period> from = days.get(day);
+        for (Period period : moving) {
+            from.remove(period);
+            period.start = plusDays(period.start, by, zone);
+            if (!period.open()) period.end = plusDays(period.end, by, zone);
+        }
+        if (from.isEmpty()) days.remove(day);
+        dirty.add(day);
+        for (Period period : moving) add(target, period);
+        return target;
+    }
+
+    private static long plusDays(long seconds, int by, ZoneId zone) {
+        return Instant.ofEpochSecond(seconds).atZone(zone).plusDays(by).toEpochSecond();
     }
 
     /** Moves a work period, with what it contains, to another job; refused if it would overlap that job's work. */
