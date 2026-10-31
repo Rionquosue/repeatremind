@@ -3,6 +3,9 @@ package style.spacedragon.repeatremind;
 import android.content.Context;
 import android.content.SharedPreferences;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -11,13 +14,38 @@ import java.util.Map;
  */
 final class WorkLogStore {
     private static final String FILE = "repeatremind_worklog";
+    private final Context context;
     private final SharedPreferences preferences;
+    /** Work the last load punched out because it ran past its scheduled shift end. */
+    final List<WorkLog.Period> punchedOut = new ArrayList<>();
 
     WorkLogStore(Context context) {
+        this.context = context;
         preferences = context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
     }
 
+    /** Loads the log, first punching out work left running past its scheduled shift end, saved at once. */
     WorkLog load() {
+        WorkLog log = read();
+        punchedOut.clear();
+        Workdays schedule;
+        try { schedule = new TaskStore(context).workdays(); }
+        catch (IllegalStateException e) { schedule = null; } // An unreadable schedule ends nothing.
+        punchedOut.addAll(punchOutLate(log, schedule));
+        if (!punchedOut.isEmpty()) {
+            try { save(log); }
+            catch (IllegalStateException e) { /* Kept in memory; saved with the next change. */ }
+        }
+        return log;
+    }
+
+    static List<WorkLog.Period> punchOutLate(WorkLog log, Workdays schedule) {
+        if (schedule == null) return new ArrayList<>();
+        ZoneId zone = ZoneId.systemDefault();
+        return log.punchOutLate(start -> schedule.shiftEnd(start, zone), System.currentTimeMillis() / 1000);
+    }
+
+    private WorkLog read() {
         WorkLog log = new WorkLog();
         try {
             log.selected = preferences.getInt("job", WorkLog.FIRST_JOB);
