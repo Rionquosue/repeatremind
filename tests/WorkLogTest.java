@@ -24,6 +24,8 @@ public final class WorkLogTest {
         reviewFixes();
         shortNames();
         mergeAndSplit();
+        latePunchOut();
+        movingDays();
         System.out.println("PASS: " + assertions + " work log assertions");
     }
 
@@ -372,6 +374,54 @@ public final class WorkLogTest {
         WorkLog.Period now = running.split(DAY, open, at("10:00"), at("11:00"));
         check(open.end == at("10:00") && now.open() && running.working(J) && running.openWork(J).getValue() == now,
                 "The later part keeps running");
+    }
+
+    private static void latePunchOut() {
+        Workdays schedule = new Workdays(); // 9:00–17:00, Monday to Friday; DAY is a Wednesday.
+        check(schedule.shiftEnd(at("08:40"), UTC) == at("17:00") && schedule.shiftEnd(at("05:00"), UTC) == at("17:00"),
+                "Punching in before the shift counts for it, up to four hours early");
+        check(schedule.shiftEnd(at("04:59"), UTC) == 0 && schedule.shiftEnd(at("17:00"), UTC) == 0,
+                "Too early or after the end belongs to no shift");
+        WorkLog log = new WorkLog();
+        int cafe = log.addJob("Cafe");
+        log.punchIn(J, at("08:55"), UTC);
+        log.start(WorkLog.Kind.PRODUCTIVE, J, at("16:00"));
+        log.punchIn(cafe, at("18:00"), UTC);
+        check(log.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("16:59")).isEmpty(), "Nothing ends before the shift does");
+        List<WorkLog.Period> closed = log.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("20:00"));
+        WorkLog.Period work = log.work(DAY, J).get(0);
+        check(closed.equals(List.of(work)) && work.end == at("17:00") && !log.working(J)
+                && log.children(DAY, work).get(0).end == at("17:00"), "Left running: punched out at the shift end, with its productive time");
+        check(log.working(cafe), "Work punched in after the shift ends keeps running");
+        // Productive or break time started after the shift end means overtime: it keeps running.
+        WorkLog overtime = new WorkLog();
+        overtime.punchIn(J, at("09:00"), UTC);
+        overtime.start(WorkLog.Kind.PRODUCTIVE, J, at("17:10"));
+        check(overtime.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("19:00")).isEmpty() && overtime.working(J),
+                "Activity after the shift end is overtime");
+        // Overnight shift: 22:00–06:00 from the day before.
+        Workdays nights = new Workdays();
+        nights.regular = new Workdays.Shift(22 * 60, 6 * 60);
+        nights.weekdays = 127;
+        check(nights.shiftEnd(at("02:00"), UTC) == at("06:00") && nights.shiftEnd(at("21:30"), UTC) == at("06:00") + 86400,
+                "Overnight shifts end the next morning");
+    }
+
+    private static void movingDays() {
+        WorkLog log = sample();
+        WorkLog.Period work = log.work(DAY).get(0);
+        log.dirty.clear();
+        LocalDate next = log.moveDays(DAY, work, 1, 0, UTC);
+        check(next.equals(DAY.plusDays(1)) && log.periods(DAY).isEmpty() && log.periods(next).size() == 3
+                && work.start == at("09:00") + 86400 && log.children(next, work).get(1).end == at("13:00") + 86400
+                && log.dirty.contains(DAY) && log.dirty.contains(next), "Work moves a day with what it holds");
+        WorkLog.Period other = log.addWork(DAY, 0, UTC, J);
+        try { log.moveDays(DAY, other, 1, 0, UTC); throw new AssertionError("Moved onto existing work"); }
+        catch (IllegalArgumentException expected) { assertions++; }
+        WorkLog running = new WorkLog();
+        running.punchIn(J, at("09:00"), UTC);
+        try { running.moveDays(DAY, running.work(DAY).get(0), -1, at("10:00"), UTC); throw new AssertionError("Moved running work"); }
+        catch (IllegalArgumentException expected) { assertions++; }
     }
 
     private static void check(boolean condition, String message) {

@@ -52,6 +52,9 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   dimmed) while the other runs for that job. Punching out of a job also ends that job's productive or break
   time, which cannot outlast it. Today's worked, productive, unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
   nothing is written on a timer. A shift past midnight stays on the day it started.
+  If you forget to punch out, work punched in for a scheduled shift (or up to four hours before it) is
+  punched out at that shift's end the next time the app opens or the tracker is on screen, with a notice.
+  Productive or break time started after the shift end counts as overtime, so that work keeps running.
 - **Work room bar:** just above the room icons, the work room has its own bar: **Tracker**, **Details**,
   **Schedule** and the current job. Tap the job to roll out your jobs, each showing whether it is off,
   punched in, productive or on break, and pick one to point the toggles at it; nothing is punched in or out for you.
@@ -68,7 +71,8 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   - Hold a handle on the touching handle of the next or previous candle of the same kind to merge the two.
   - Swipe sideways across a candle to cut it in two there; cutting work also cuts the time inside it.
   - Tap a candle for its details: job, start and end with dates, length and, for work, the time inside it,
-    with buttons to change the times or job, or delete it.
+    with buttons to change the times or job, or delete it. For work, **Day** on the start moves the whole
+    period, with what it holds, to another day; **Day** on the end sets whether it ends that day or the next.
   - **+ Work**, **+ Productive** and **+ Break** add periods.
 
   Within a job, periods never overlap and productive and break time stay inside their work period; jobs
@@ -155,7 +159,7 @@ and readable label contrast over a grid of sRGB colours. `ScheduleTest` checks s
 validation, list labels, and the date-level recurrence helpers. `WorkdaysTest` checks shift and
 break validation, overnight shifts, reminder lead times across midnight and DST, per-day shifts,
 one delivery per shift, and workday labels. `WorkLogTest` checks the punch clock toggles, totals,
-editing limits and 5-minute snapping, adding, deleting, merging and cutting periods, short job names, night shifts, jobs (switching, totals
+editing limits and 5-minute snapping, adding, deleting, merging, cutting and moving periods between days, punching out at the scheduled shift end, short job names, night shifts, jobs (switching, totals
 by job, archiving, storage), and both CSV formats including quoting. `ReminderStateTest` also covers temporary tasks,
 wake-up selection, late completion, clock changes and compact history storage.
 The framework-only `SmokeInstrumentation` additionally exercises editor persistence, list
