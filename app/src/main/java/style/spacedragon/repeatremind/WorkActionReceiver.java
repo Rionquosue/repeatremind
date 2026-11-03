@@ -5,11 +5,19 @@ import android.content.Context;
 import android.content.Intent;
 import java.time.ZoneId;
 
-/** The work controls notification's buttons: each toggles one state of its job, then redraws the notification. */
+/**
+ * The work controls notification's buttons, each toggling one state of its job and then redrawing it, and its
+ * ten-minute check that puts it back after a swipe.
+ */
 public final class WorkActionReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
-        int job = intent.getIntExtra("job", 0);
         String action = intent.getAction();
+        if (WorkControls.CHECK.equals(action)) {
+            // Redrawn only if it was swiped away; otherwise the next check is armed.
+            if (WorkControls.showing(context)) WorkControls.scheduleCheck(context, true); else WorkControls.refresh(context);
+            return;
+        }
+        int job = intent.getIntExtra("job", 0);
         try {
             WorkLogStore store = new WorkLogStore(context);
             WorkLog log = store.load();

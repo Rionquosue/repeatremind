@@ -1,6 +1,7 @@
 package style.spacedragon.repeatremind;
 
 import android.Manifest;
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,6 +11,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Icon;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -20,7 +22,8 @@ import java.util.List;
 /**
  * A silent, media-style notification with punch, productive and break buttons for the schedule's job. It shows
  * from shortly before each shift until the shift ends, and for as long as that job stays punched in. It is
- * redrawn only when something changes: a shift edge alarm, a button, or an edit in the app.
+ * redrawn only when something changes: a shift edge alarm, a button, or an edit in the app; while shown, a
+ * ten-minute check puts it back if it was swiped away.
  */
 final class WorkControls {
     private static final String CHANNEL = "work_controls";
@@ -29,6 +32,9 @@ final class WorkControls {
     static final String PUNCH = "style.spacedragon.repeatremind.PUNCH";
     static final String PRODUCTIVE = "style.spacedragon.repeatremind.PRODUCTIVE";
     static final String BREAK = "style.spacedragon.repeatremind.BREAK";
+    static final String CHECK = "style.spacedragon.repeatremind.CHECK_CONTROLS";
+    /** While shown, the notification is put back this often if it was swiped away. */
+    private static final long CHECK_EVERY_MS = 10 * 60 * 1000;
     private static boolean channelReady;
 
     private WorkControls() { }
@@ -43,17 +49,44 @@ final class WorkControls {
 
     static void update(Context context, Workdays work) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (work == null || !work.controls || !allowed(context, manager)) { manager.cancel(NOTIFICATION); return; }
+        if (work == null || !work.controls || !allowed(context, manager)) { hide(context, manager); return; }
         WorkLog log;
         try { log = new WorkLogStore(context).load(); }
-        catch (IllegalStateException e) { manager.cancel(NOTIFICATION); return; }
+        catch (IllegalStateException e) { hide(context, manager); return; }
         ZoneId zone = ZoneId.systemDefault();
         Workdays.Occurrence shift = work.controlsShift(Instant.now(), zone);
         int job = job(log, work);
-        if (shift == null && !log.working(job)) { manager.cancel(NOTIFICATION); return; }
+        if (shift == null && !log.working(job)) { hide(context, manager); return; }
         ensureChannel(context, manager);
         try { manager.notify(NOTIFICATION, build(context, log, job, shift, zone)); }
         catch (SecurityException ignored) { /* Notification permission can be revoked between the check and posting. */ }
+        scheduleCheck(context, true);
+    }
+
+    private static void hide(Context context, NotificationManager manager) {
+        manager.cancel(NOTIFICATION);
+        scheduleCheck(context, false);
+    }
+
+    /** Whether the notification is still in the shade, i.e. not swiped away. */
+    static boolean showing(Context context) {
+        for (StatusBarNotification posted : context.getSystemService(NotificationManager.class).getActiveNotifications()) {
+            if (posted.getId() == NOTIFICATION) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Arms or cancels the ten-minute check that puts a swiped-away notification back. The alarm does not wake
+     * the phone: a sleeping phone runs the check when it is next woken, which is when the notification matters.
+     */
+    static void scheduleCheck(Context context, boolean on) {
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        PendingIntent check = PendingIntent.getBroadcast(context, CHECK.hashCode(),
+                new Intent(context, WorkActionReceiver.class).setAction(CHECK),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        if (on) alarms.set(AlarmManager.RTC, System.currentTimeMillis() + CHECK_EVERY_MS, check);
+        else alarms.cancel(check);
     }
 
     private static boolean allowed(Context context, NotificationManager manager) {

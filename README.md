@@ -55,7 +55,8 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
 - **Work controls notification:** from half an hour before each scheduled shift until it ends, and for as
   long as the schedule's job stays punched in, a silent media-style notification shows that job's state with
   **Punch in/out**, **productive** and **break** buttons, on the lock screen too. Only the buttons that apply
-  are shown, and the time since punching in counts up on its own. It is redrawn only when something changes,
+  are shown, and the time since punching in counts up on its own. If you swipe it away, it comes back
+  within ten minutes (checked by an alarm that does not wake the phone). It is redrawn only when something changes,
   using the schedule's existing exact alarm for the shift edges. Turn it off, or choose the job a schedule is
   for, in **Schedule**.
   If you forget to punch out, the schedule's job, punched in for a scheduled shift (or up to four hours before it), is
