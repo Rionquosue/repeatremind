@@ -17,6 +17,7 @@ final class WorkdaysJson {
         }
         return new JSONObject().put("mode", work.mode.name()).put("weekdays", work.weekdays)
                 .put("regular", shift(work.regular)).put("shifts", shifts).put("reminder", work.reminder)
+                .put("controls", work.controls).put("job", work.job)
                 .put("prepMinutes", work.prepMinutes).put("commuteMinutes", work.commuteMinutes)
                 .put("reminderMinutes", work.reminderMinutes).put("lastReminder", work.lastReminder);
     }
@@ -34,6 +35,8 @@ final class WorkdaysJson {
             }
         }
         work.reminder = json.optBoolean("reminder", true);
+        work.controls = json.optBoolean("controls", true);
+        work.job = json.optInt("job", WorkLog.FIRST_JOB);
         work.prepMinutes = json.getInt("prepMinutes");
         work.commuteMinutes = json.getInt("commuteMinutes");
         work.reminderMinutes = json.getInt("reminderMinutes");

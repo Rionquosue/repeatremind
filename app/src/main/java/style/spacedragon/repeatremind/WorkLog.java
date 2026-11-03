@@ -450,23 +450,23 @@ final class WorkLog {
     }
 
     /**
-     * Punches out work left running past the end of its scheduled shift, at that end, as the user would have.
-     * Work with productive or break time started after that end is overtime and keeps running. {@code shiftEnd}
-     * gives the end for a punch-in time, or 0 for none. Returns the work periods it closed.
+     * Punches out the scheduled job's work left running past the end of its shift, at that end, as the user
+     * would have. Work with productive or break time started after that end is overtime and keeps running.
+     * {@code shiftEnd} gives the end for a punch-in time, or 0 for none. Returns the work periods it closed.
      */
-    List<Period> punchOutLate(LongUnaryOperator shiftEnd, long now) {
+    List<Period> punchOutLate(int job, LongUnaryOperator shiftEnd, long now) {
         List<Period> closed = new ArrayList<>();
-        for (int job : workingJobs()) {
-            var open = openWork(job);
+        var open = openWork(job);
+        if (open != null) {
             long end = shiftEnd.applyAsLong(open.getValue().start);
-            if (end <= open.getValue().start || now < end) continue;
             boolean overtime = false;
             for (Period period : days.get(open.getKey())) {
                 if (period.job == job && period.open() && period.kind != Kind.WORK && period.start >= end) overtime = true;
             }
-            if (overtime) continue;
-            punchOut(job, end);
-            closed.add(open.getValue());
+            if (end > open.getValue().start && now >= end && !overtime) {
+                punchOut(job, end);
+                closed.add(open.getValue());
+            }
         }
         return closed;
     }

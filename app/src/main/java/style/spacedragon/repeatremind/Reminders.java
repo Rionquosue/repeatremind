@@ -113,9 +113,13 @@ final class Reminders {
             exact = Math.min(exact, task.nextReminder(zone));
             if (allowed) followUp = Math.min(followUp, task.nextFollowUp());
         }
-        if (data.work != null) exact = Math.min(exact, data.work.nextAlarm(now, zone));
+        if (data.work != null) {
+            exact = Math.min(exact, data.work.nextAlarm(now, zone));
+            exact = Math.min(exact, data.work.nextControlsChange(now, zone));
+        }
         schedule(context, EXACT_ALARM, exact, true);
         schedule(context, FOLLOW_UP_ALARM, followUp < exact ? followUp : Long.MAX_VALUE, false);
+        WorkControls.update(context, data.work);
         return data;
     }
 
