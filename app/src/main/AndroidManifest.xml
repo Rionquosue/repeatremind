@@ -27,6 +27,16 @@
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".TaskActionReceiver" android:exported="false" />
         <receiver android:name=".WorkActionReceiver" android:exported="false" />
+        <receiver android:name=".TaskWidget" android:exported="true" android:label="Repeating tasks">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_tasks_info" />
+        </receiver>
+        <receiver android:name=".WorkWidget" android:exported="true" android:label="Work punch clock">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_work_info" />
+        </receiver>
+        <service android:name=".TaskWidgetService" android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <receiver android:name=".ClockReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.TIME_SET" />

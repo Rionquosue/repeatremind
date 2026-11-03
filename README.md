@@ -85,6 +85,13 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   Within a job, periods never overlap and productive and break time stay inside their work period; jobs
   that overlap in time get side-by-side lanes in each column. Worked time excludes breaks; unproductive time
   is worked time that was not productive.
+- **Widgets:** two home screen widgets, with no update timer of their own.
+  - **Repeating tasks** (2×2, resizable): every task with its status and **Completed**/**Undo** and
+    **Ignore**/**Resume**, the same toggles as the task list. Redrawn after each change and at midnight.
+  - **Work punch clock** (2×1, resizable): the job's short name and state with **Punch in/out**,
+    **productive** and **break** buttons. A running state is highlighted, buttons that cannot apply yet are
+    dimmed, and the time since punching in counts up on its own. It uses the schedule's job, or the tracker's
+    job without a schedule.
 - **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage
   permission). Choose the dates (the month shown, all recorded days, or a range), one job or all, and a format:
   - **Daily summary:** one row per day and job: date, weekday, job, first in, last out, punched, break,

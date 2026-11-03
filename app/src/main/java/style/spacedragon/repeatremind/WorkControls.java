@@ -47,15 +47,20 @@ final class WorkControls {
         update(context, work);
     }
 
+    /** Also redraws the work widget, if placed, from the same read of the log. */
     static void update(Context context, Workdays work) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (work == null || !work.controls || !allowed(context, manager)) { hide(context, manager); return; }
+        boolean notify = work != null && work.controls && allowed(context, manager);
+        boolean widget = WorkWidget.present(context);
+        if (!notify && !widget) { hide(context, manager); return; }
         WorkLog log;
         try { log = new WorkLogStore(context).load(); }
         catch (IllegalStateException e) { hide(context, manager); return; }
+        int job = job(log, work);
+        if (widget) WorkWidget.update(context, log, job);
+        if (!notify) { hide(context, manager); return; }
         ZoneId zone = ZoneId.systemDefault();
         Workdays.Occurrence shift = work.controlsShift(Instant.now(), zone);
-        int job = job(log, work);
         if (shift == null && !log.working(job)) { hide(context, manager); return; }
         ensureChannel(context, manager);
         try { manager.notify(NOTIFICATION, build(context, log, job, shift, zone)); }
@@ -97,10 +102,11 @@ final class WorkControls {
                 && (channel == null || channel.getImportance() != NotificationManager.IMPORTANCE_NONE);
     }
 
-    /** The schedule's job, or the first active job if that one was archived. */
+    /** The schedule's job, or the tracker's job without a schedule; the first active job if that one was archived. */
     static int job(WorkLog log, Workdays work) {
+        int job = work == null ? log.selected : work.job;
         List<Integer> active = log.activeJobs();
-        return active.contains(work.job) || log.working(work.job) ? work.job : active.get(0);
+        return active.contains(job) || log.working(job) ? job : active.get(0);
     }
 
     private static Notification build(Context context, WorkLog log, int job, Workdays.Occurrence shift, ZoneId zone) {
