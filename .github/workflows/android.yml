@@ -41,6 +41,8 @@ jobs:
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell pm grant style.spacedragon.repeatremind android.permission.POST_NOTIFICATIONS
             adb shell appops set style.spacedragon.repeatremind SCHEDULE_EXACT_ALARM allow
+            # A freshly booted emulator's launcher can stall; its "isn't responding" dialog would take focus mid-test.
+            adb shell settings put global hide_error_dialogs 1
             adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation | tee smoke-results.txt
             adb logcat -d -b crash > smoke-crash.txt
             cat smoke-crash.txt

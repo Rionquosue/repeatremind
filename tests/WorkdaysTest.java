@@ -19,6 +19,7 @@ public final class WorkdaysTest {
         shiftReminders();
         delivery();
         labels();
+        controls();
         System.out.println("PASS: " + assertions + " workday assertions");
     }
 
@@ -172,6 +173,33 @@ public final class WorkdaysTest {
     private static void same(String actual, String expected) {
         check(expected.equals(actual), "Expected \"" + expected + "\" but was \"" + actual + "\"");
     }
+    private static void controls() {
+        Workdays work = new Workdays(); // 9:00–17:00, Monday to Friday
+        Instant wednesday = Instant.parse("2026-10-28T08:29:00Z");
+        check(work.controlsShift(wednesday, UTC) == null, "No controls more than half an hour before the shift");
+        check(work.nextControlsChange(wednesday, UTC) == Instant.parse("2026-10-28T08:30:00Z").toEpochMilli(),
+                "Controls appear half an hour before the shift");
+        Instant during = Instant.parse("2026-10-28T12:00:00Z");
+        check(work.controlsShift(during, UTC) != null && work.controlsShift(during, UTC).date.equals(LocalDate.of(2026, 10, 28)),
+                "Controls show during the shift");
+        check(work.nextControlsChange(during, UTC) == Instant.parse("2026-10-28T17:00:00Z").toEpochMilli(), "and go at its end");
+        Instant friday = Instant.parse("2026-10-30T18:00:00Z");
+        check(work.controlsShift(friday, UTC) == null
+                && work.nextControlsChange(friday, UTC) == Instant.parse("2026-11-02T08:30:00Z").toEpochMilli(),
+                "After Friday's shift, next comes Monday");
+        work.controls = false;
+        check(work.nextControlsChange(during, UTC) == Long.MAX_VALUE, "No alarms when the controls are off");
+        Workdays nights = new Workdays();
+        nights.regular = new Workdays.Shift(22 * 60, 6 * 60);
+        Instant early = Instant.parse("2026-10-29T03:00:00Z");
+        check(nights.controlsShift(early, UTC) != null && nights.controlsShift(early, UTC).date.equals(LocalDate.of(2026, 10, 28))
+                && nights.nextControlsChange(early, UTC) == Instant.parse("2026-10-29T06:00:00Z").toEpochMilli(),
+                "An overnight shift keeps its controls until the morning");
+        Workdays copy = work.copy();
+        work.job = 3;
+        check(!copy.controls && work.copy().job == 3, "Controls and job are copied for editing");
+    }
+
     private static void check(boolean condition, String message) {
         assertions++; if (!condition) throw new AssertionError(message);
     }

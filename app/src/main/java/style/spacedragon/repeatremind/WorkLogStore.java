@@ -16,6 +16,8 @@ final class WorkLogStore {
     private static final String FILE = "repeatremind_worklog";
     private final Context context;
     private final SharedPreferences preferences;
+    /** Counts saves in this process, so a screen can tell its copy is out of date, e.g. after a notification button. */
+    static volatile int version;
     /** Work the last load punched out because it ran past its scheduled shift end. */
     final List<WorkLog.Period> punchedOut = new ArrayList<>();
 
@@ -42,7 +44,7 @@ final class WorkLogStore {
     static List<WorkLog.Period> punchOutLate(WorkLog log, Workdays schedule) {
         if (schedule == null) return new ArrayList<>();
         ZoneId zone = ZoneId.systemDefault();
-        return log.punchOutLate(start -> schedule.shiftEnd(start, zone), System.currentTimeMillis() / 1000);
+        return log.punchOutLate(schedule.job, start -> schedule.shiftEnd(start, zone), System.currentTimeMillis() / 1000);
     }
 
     private WorkLog read() {
@@ -73,6 +75,7 @@ final class WorkLogStore {
             if (periods.isEmpty()) edit.remove("d" + day); else edit.putString("d" + day, WorkLog.text(periods));
         }
         if (!edit.commit()) throw new IllegalStateException("Work hours could not be saved");
+        version++;
         log.dirty.clear();
         log.jobsDirty = false;
     }

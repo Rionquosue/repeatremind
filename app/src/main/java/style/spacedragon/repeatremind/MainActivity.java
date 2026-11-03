@@ -110,6 +110,12 @@ public final class MainActivity extends BaseActivity {
         launch(new Intent(this, TaskEditorActivity.class).putExtra("task_id", id));
     }
 
+    /** A notification button can change the work log while this screen stays open under the shade. */
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && room == WORK && work.outdated()) rerender();
+    }
+
     @Override protected void onResume() {
         super.onResume();
         TaskStore store = new TaskStore(this);

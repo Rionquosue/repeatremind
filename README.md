@@ -52,7 +52,14 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   dimmed) while the other runs for that job. Punching out of a job also ends that job's productive or break
   time, which cannot outlast it. Today's worked, productive, unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
   nothing is written on a timer. A shift past midnight stays on the day it started.
-  If you forget to punch out, work punched in for a scheduled shift (or up to four hours before it) is
+- **Work controls notification:** from half an hour before each scheduled shift until it ends, and for as
+  long as the schedule's job stays punched in, a silent media-style notification shows that job's state with
+  **Punch in/out**, **productive** and **break** buttons, on the lock screen too. Only the buttons that apply
+  are shown, and the time since punching in counts up on its own. If you swipe it away, it comes back
+  within ten minutes (checked by an alarm that does not wake the phone). It is redrawn only when something changes,
+  using the schedule's existing exact alarm for the shift edges. Turn it off, or choose the job a schedule is
+  for, in **Schedule**.
+  If you forget to punch out, the schedule's job, punched in for a scheduled shift (or up to four hours before it), is
   punched out at that shift's end the next time the app opens or the tracker is on screen, with a notice.
   Productive or break time started after the shift end counts as overtime, so that work keeps running.
 - **Work room bar:** just above the room icons, the work room has its own bar: **Tracker**, **Details**,
