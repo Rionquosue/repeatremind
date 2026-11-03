@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="8dp" android:background="@drawable/widget_button">
+    <TextView android:id="@+id/task_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textSize="14sp" android:textStyle="bold" android:textColor="@color/widget_text"
+        android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/task_detail" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textSize="12sp" android:textColor="@color/widget_secondary" android:maxLines="1" android:ellipsize="end" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingTop="6dp">
+        <TextView android:id="@+id/task_complete" android:layout_width="0dp" android:layout_height="32dp"
+            android:layout_weight="1" android:gravity="center" android:textSize="13sp"
+            android:textColor="@color/widget_text" android:background="@drawable/widget_background" />
+        <TextView android:id="@+id/task_ignore" android:layout_width="0dp" android:layout_height="32dp"
+            android:layout_weight="1" android:layout_marginStart="6dp" android:gravity="center" android:textSize="13sp"
+            android:textColor="@color/widget_text" android:background="@drawable/widget_background" />
+    </LinearLayout>
+</LinearLayout>

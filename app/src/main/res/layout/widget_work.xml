@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/work_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center" android:padding="4dp"
+    android:background="@drawable/widget_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center" android:paddingStart="4dp" android:paddingEnd="4dp">
+        <TextView android:id="@+id/work_state" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textSize="12sp" android:textStyle="bold" android:textColor="@color/widget_text"
+            android:maxLines="1" android:ellipsize="end" />
+        <Chronometer android:id="@+id/work_clock" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="4dp" android:textSize="12sp" android:textColor="@color/widget_secondary" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:minHeight="28dp" android:orientation="horizontal" android:paddingTop="2dp">
+        <ImageView android:id="@+id/work_punch" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:padding="4dp" android:scaleType="fitCenter"
+            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+        <ImageView android:id="@+id/work_productive" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginStart="4dp" android:padding="4dp" android:scaleType="fitCenter"
+            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+        <ImageView android:id="@+id/work_break" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginStart="4dp" android:padding="4dp" android:scaleType="fitCenter"
+            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+    </LinearLayout>
+</LinearLayout>
