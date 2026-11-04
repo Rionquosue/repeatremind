@@ -7,6 +7,10 @@
     <string name="temporary_task">Temporary task</string>
     <string name="work_reminder">Remind me before work</string>
     <string name="work_break">Break</string>
+    <string name="work_controls">Show punch buttons in a notification during shifts</string>
+    <string name="work_controls_channel">Work controls</string>
+    <string name="widget_tasks">Repeating tasks, with Completed and Ignore</string>
+    <string name="widget_work">Punch in/out, productive and break</string>
     <string name="task_enabled">Task enabled</string>
     <string name="completed">Completed</string>
     <string name="ignore">Ignore</string>

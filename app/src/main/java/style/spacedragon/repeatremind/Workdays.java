@@ -54,15 +54,20 @@ final class Workdays {
     static final class Occurrence {
         final LocalDate date;
         final Shift shift;
-        final Instant remindAt, prepAt, leaveAt, startAt;
+        final Instant remindAt, prepAt, leaveAt, startAt, endAt;
 
         Occurrence(Workdays work, LocalDate date, Shift shift, ZoneId zone) {
             this.date = date; this.shift = shift;
-            startAt = date.atTime(LocalTime.ofSecondOfDay(shift.start * 60L)).atZone(zone).toInstant();
+            LocalDateTime start = date.atTime(LocalTime.ofSecondOfDay(shift.start * 60L));
+            startAt = start.atZone(zone).toInstant();
+            endAt = start.plusMinutes(shift.length()).atZone(zone).toInstant();
             leaveAt = startAt.minusSeconds(work.commuteMinutes * 60L);
             prepAt = leaveAt.minusSeconds(work.prepMinutes * 60L);
             remindAt = prepAt.minusSeconds(work.reminderMinutes * 60L);
         }
+
+        /** The work controls notification shows from shortly before the shift until it ends. */
+        Instant controlsFrom() { return startAt.minusSeconds(CONTROLS_EARLY_SECONDS); }
     }
 
     static final class Update {
@@ -75,6 +80,10 @@ final class Workdays {
     Shift regular = new Shift(9 * 60, 17 * 60);
     final NavigableMap<LocalDate, Shift> shifts = new TreeMap<>();
     boolean reminder = true;
+    /** Shows punch, productive and break buttons in a silent notification during shifts. */
+    boolean controls = true;
+    /** The job the schedule is for: the work controls act on it. */
+    int job = 1;
     int prepMinutes = 30;
     int commuteMinutes = 30;
     int reminderMinutes = 15;
@@ -99,6 +108,35 @@ final class Workdays {
     Shift shiftOn(LocalDate date) {
         if (mode == Mode.SHIFTS) return shifts.get(date);
         return (weekdays & (1 << (date.getDayOfWeek().getValue() - 1))) != 0 ? regular : null;
+    }
+
+    /** The work controls appear this long before a shift starts, so punching in a little early is easy. */
+    static final long CONTROLS_EARLY_SECONDS = 30 * 60;
+
+    /** The shift whose work controls are showing at this instant, or null outside them. */
+    Occurrence controlsShift(Instant now, ZoneId zone) {
+        LocalDate date = now.atZone(zone).toLocalDate().minusDays(1);
+        for (int i = 0; i < 3; i++) {
+            Occurrence next = nextShift(date, zone);
+            if (next == null || now.isBefore(next.controlsFrom())) return null;
+            if (now.isBefore(next.endAt)) return next;
+            date = next.date.plusDays(1);
+        }
+        return null;
+    }
+
+    /** When the work controls next appear or go, in epoch milliseconds; never when they are off. */
+    long nextControlsChange(Instant now, ZoneId zone) {
+        if (!controls) return Long.MAX_VALUE;
+        LocalDate date = now.atZone(zone).toLocalDate().minusDays(1);
+        for (int i = 0; i < 400; i++) {
+            Occurrence next = nextShift(date, zone);
+            if (next == null) return Long.MAX_VALUE;
+            if (now.isBefore(next.controlsFrom())) return next.controlsFrom().toEpochMilli();
+            if (now.isBefore(next.endAt)) return next.endAt.toEpochMilli();
+            date = next.date.plusDays(1);
+        }
+        return Long.MAX_VALUE;
     }
 
     /** Punching in up to this long before a shift starts counts as working that shift. */
@@ -187,7 +225,7 @@ final class Workdays {
         copy.mode = mode; copy.weekdays = weekdays; copy.regular = regular.copy();
         for (var entry : shifts.entrySet()) copy.shifts.put(entry.getKey(), entry.getValue().copy());
         copy.reminder = reminder; copy.prepMinutes = prepMinutes; copy.commuteMinutes = commuteMinutes;
-        copy.reminderMinutes = reminderMinutes;
+        copy.reminderMinutes = reminderMinutes; copy.controls = controls; copy.job = job;
         return copy;
     }
 }

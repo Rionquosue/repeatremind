@@ -289,6 +289,19 @@ public final class SmokeInstrumentation extends Instrumentation {
             ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,
                     "Schedule sub-room holds the work schedule");
+            // Widget layouts only fail when inflated, so inflate them as the launcher would.
+            ui(() -> {
+                WorkLog widgetLog = new WorkLogStore(context).load();
+                android.view.View work = WorkWidget.views(context, widgetLog, WorkLog.FIRST_JOB)
+                        .apply(context, new android.widget.FrameLayout(context));
+                check(((TextView) work.findViewById(R.id.work_state)).getText().toString().startsWith("MJ · "),
+                        "Work widget renders its job and state");
+                new android.widget.RemoteViews(context.getPackageName(), R.layout.widget_tasks)
+                        .apply(context, new android.widget.FrameLayout(context));
+                new android.widget.RemoteViews(context.getPackageName(), R.layout.widget_task_row)
+                        .apply(context, new android.widget.FrameLayout(context));
+                check(true, "Task widget layouts inflate");
+            });
             ui(tracker::finish); waitForIdleSync();
 
             Activity custom = startActivitySync(new Intent(context, CustomThemeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));

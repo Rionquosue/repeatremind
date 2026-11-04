@@ -387,8 +387,8 @@ public final class WorkLogTest {
         log.punchIn(J, at("08:55"), UTC);
         log.start(WorkLog.Kind.PRODUCTIVE, J, at("16:00"));
         log.punchIn(cafe, at("18:00"), UTC);
-        check(log.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("16:59")).isEmpty(), "Nothing ends before the shift does");
-        List<WorkLog.Period> closed = log.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("20:00"));
+        check(log.punchOutLate(J, start -> schedule.shiftEnd(start, UTC), at("16:59")).isEmpty(), "Nothing ends before the shift does");
+        List<WorkLog.Period> closed = log.punchOutLate(J, start -> schedule.shiftEnd(start, UTC), at("20:00"));
         WorkLog.Period work = log.work(DAY, J).get(0);
         check(closed.equals(List.of(work)) && work.end == at("17:00") && !log.working(J)
                 && log.children(DAY, work).get(0).end == at("17:00"), "Left running: punched out at the shift end, with its productive time");
@@ -397,7 +397,7 @@ public final class WorkLogTest {
         WorkLog overtime = new WorkLog();
         overtime.punchIn(J, at("09:00"), UTC);
         overtime.start(WorkLog.Kind.PRODUCTIVE, J, at("17:10"));
-        check(overtime.punchOutLate(start -> schedule.shiftEnd(start, UTC), at("19:00")).isEmpty() && overtime.working(J),
+        check(overtime.punchOutLate(J, start -> schedule.shiftEnd(start, UTC), at("19:00")).isEmpty() && overtime.working(J),
                 "Activity after the shift end is overtime");
         // Overnight shift: 22:00–06:00 from the day before.
         Workdays nights = new Workdays();

@@ -37,6 +37,7 @@ public final class WorkDayActivity extends BaseActivity {
     private TextView summary;
     /** The user's time format, and the same without AM/PM for narrow candles. */
     private DateTimeFormatter time, compact;
+    private int loadedVersion;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -44,6 +45,7 @@ public final class WorkDayActivity extends BaseActivity {
             day = LocalDate.parse(getIntent().getStringExtra("date"));
             WorkLogStore store = new WorkLogStore(this);
             log = store.load();
+            loadedVersion = WorkLogStore.version;
             render();
             for (WorkLog.Period work : store.punchedOut) {
                 Toast.makeText(this, "Punched out of " + log.jobName(work.job) + " at " + clock(work.end)
@@ -139,9 +141,23 @@ public final class WorkDayActivity extends BaseActivity {
     private ZonedDateTime local(long seconds) { return Instant.ofEpochSecond(seconds).atZone(zone()); }
 
     private void save() {
-        try { new WorkLogStore(this).save(log); }
-        catch (RuntimeException e) { error(e); }
+        try {
+            new WorkLogStore(this).save(log);
+            loadedVersion = WorkLogStore.version;
+        } catch (RuntimeException e) { error(e); }
+        WorkControls.refresh(this);
         refresh();
+    }
+
+    /** Reads the log again if a notification button changed it while this screen was open. */
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus || log == null || loadedVersion == WorkLogStore.version) return;
+        try {
+            log = new WorkLogStore(this).load();
+            loadedVersion = WorkLogStore.version;
+            refresh();
+        } catch (IllegalStateException e) { error(e); }
     }
 
     // ---- Details ----

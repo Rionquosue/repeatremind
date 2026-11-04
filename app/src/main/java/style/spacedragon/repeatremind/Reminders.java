@@ -113,9 +113,19 @@ final class Reminders {
             exact = Math.min(exact, task.nextReminder(zone));
             if (allowed) followUp = Math.min(followUp, task.nextFollowUp());
         }
-        if (data.work != null) exact = Math.min(exact, data.work.nextAlarm(now, zone));
+        if (data.work != null) {
+            exact = Math.min(exact, data.work.nextAlarm(now, zone));
+            exact = Math.min(exact, data.work.nextControlsChange(now, zone));
+        }
+        // Placed task widgets show the day's occurrences, so they are redrawn when the day changes.
+        boolean widgets = TaskWidget.present(context);
+        if (widgets && !data.tasks.isEmpty()) {
+            exact = Math.min(exact, LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
+        }
         schedule(context, EXACT_ALARM, exact, true);
         schedule(context, FOLLOW_UP_ALARM, followUp < exact ? followUp : Long.MAX_VALUE, false);
+        WorkControls.update(context, data.work);
+        if (widgets) TaskWidget.refresh(context);
         return data;
     }
 

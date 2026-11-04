@@ -18,6 +18,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
@@ -30,7 +31,9 @@ public final class WorkdaysActivity extends BaseActivity {
     private int daysShown = DAYS_PER_PAGE;
     private LinearLayout regularFields, shiftFields, shiftDays;
     private EditText prep, commute, remind;
-    private CheckBox reminderCheck;
+    private CheckBox reminderCheck, controlsCheck;
+    /** The work log's jobs, for choosing which one the schedule is for; null if they cannot be read. */
+    private WorkLog jobs;
     private TextView preview;
     private DateTimeFormatter time;
 
@@ -38,6 +41,7 @@ public final class WorkdaysActivity extends BaseActivity {
         super.onCreate(state);
         try {
             Workdays saved = new TaskStore(this).workdays();
+            try { jobs = new WorkLogStore(this).load(); } catch (IllegalStateException e) { jobs = null; }
             existing = saved != null;
             if (state != null && state.containsKey("draft")) {
                 work = WorkdaysJson.fromJson(new JSONObject(state.getString("draft")));
@@ -100,6 +104,15 @@ public final class WorkdaysActivity extends BaseActivity {
         remind = minutes("Reminder", work.reminderMinutes); form.addView(remind);
         reminderCheck = checkBox(R.string.work_reminder, work.reminder);
         form.addView(reminderCheck);
+        controlsCheck = checkBox(R.string.work_controls, work.controls);
+        form.addView(controlsCheck);
+        if (jobs != null && jobs.activeJobs().size() > 1) {
+            form.addView(label("Job for this schedule"));
+            if (!jobs.activeJobs().contains(work.job)) work.job = jobs.activeJobs().get(0);
+            Button job = button(jobs.jobName(work.job), null);
+            job.setOnClickListener(v -> pickJob(job));
+            form.addView(job);
+        }
         preview = text("", 13, palette.secondary);
         form.addView(preview);
 
@@ -218,6 +231,20 @@ public final class WorkdaysActivity extends BaseActivity {
         work.commuteMinutes = minutes(commute);
         work.reminderMinutes = minutes(remind);
         work.reminder = reminderCheck.isChecked();
+        work.controls = controlsCheck.isChecked();
+    }
+
+    /** The job the work controls and the shift-end punch-out act on. */
+    private void pickJob(Button button) {
+        List<Integer> active = jobs.activeJobs();
+        String[] names = new String[active.size()];
+        for (int i = 0; i < names.length; i++) names[i] = jobs.jobName(active.get(i));
+        new AlertDialog.Builder(this).setTitle("Job for this schedule")
+                .setSingleChoiceItems(names, active.indexOf(work.job), (dialog, which) -> {
+                    dialog.dismiss();
+                    work.job = active.get(which);
+                    button.setText(names[which]);
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private static int minutes(EditText field) {

@@ -49,11 +49,15 @@ final class WorkRoom {
     private int chosenJob;
     /** The work schedule last rendered with, for punching out work left running past its shift end. */
     private Workdays schedule;
+    private int loadedVersion;
 
     WorkRoom(MainActivity activity) { a = activity; }
 
     /** True while the tracker shows a running clock, so its totals update each minute. */
     boolean ticking(int sub) { return sub == TRACKER && log != null && log.working() && clock != null; }
+
+    /** True when something else, such as a notification button, saved the log after this copy was read. */
+    boolean outdated() { return log != null && loadedVersion != WorkLogStore.version; }
 
     /** Reads the log again on the next render, e.g. after another screen may have changed it. */
     void invalidate() { stale = true; }
@@ -91,11 +95,12 @@ final class WorkRoom {
         scroll.addView(content);
         body.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         // The schedule needs no log, but the bar's job button does.
-        if (log == null || stale) {
+        if (log == null || stale || outdated()) {
             try {
                 WorkLogStore store = new WorkLogStore(a);
                 log = store.load();
                 stale = false;
+                loadedVersion = WorkLogStore.version;
                 notePunchedOut(store.punchedOut);
             } catch (IllegalStateException e) {
                 log = null;
@@ -280,8 +285,11 @@ final class WorkRoom {
     }
 
     private void save() {
-        try { new WorkLogStore(a).save(log); }
-        catch (RuntimeException e) { a.message("Work hours could not be saved: " + e.getMessage()); stale = true; }
+        try {
+            new WorkLogStore(a).save(log);
+            loadedVersion = WorkLogStore.version;
+        } catch (RuntimeException e) { a.message("Work hours could not be saved: " + e.getMessage()); stale = true; }
+        WorkControls.update(a, schedule);
         a.rerender();
     }
 
