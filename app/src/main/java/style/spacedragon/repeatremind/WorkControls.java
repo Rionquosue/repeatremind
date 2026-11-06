@@ -59,10 +59,11 @@ final class WorkControls {
         boolean widget = WorkWidget.present(context);
         if (!notify && !widget) { hide(context, manager); return; }
         WorkLog log;
-        try { log = new WorkLogStore(context).load(); }
+        WorkLogStore store = new WorkLogStore(context);
+        try { log = store.load(); }
         catch (IllegalStateException e) { hide(context, manager); return; }
         int job = job(log, work);
-        if (widget) WorkWidget.update(context, log, job);
+        if (widget) WorkWidget.update(context, log, WorkWidget.job(store, log, work));
         if (!notify) { hide(context, manager); return; }
         ZoneId zone = ZoneId.systemDefault();
         Workdays.Occurrence shift = work.controlsShift(Instant.now(), zone);

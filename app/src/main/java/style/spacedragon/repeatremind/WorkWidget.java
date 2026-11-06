@@ -10,8 +10,8 @@ import android.os.SystemClock;
 import android.widget.RemoteViews;
 
 /**
- * A small home screen punch clock: Punch in/out, productive and break for the schedule's job, or the tracker's
- * job without a schedule. Its buttons share the work notification's receiver, and it is redrawn with it.
+ * A small home screen punch clock: Punch in/out, productive and break for the job chosen on the widget, else
+ * the schedule's job, or the tracker's job without a schedule. Its buttons share the work notification's receiver, and it is redrawn with it.
  */
 public final class WorkWidget extends AppWidgetProvider {
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
@@ -35,9 +35,14 @@ public final class WorkWidget extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_work);
         boolean working = log.working(job);
         boolean productive = log.running(WorkLog.Kind.PRODUCTIVE, job), onBreak = log.running(WorkLog.Kind.BREAK, job);
-        String state = !working ? "Off" : productive ? "Productive" : onBreak ? "On break" : "In";
+        String state = state(log, job);
         views.setTextViewText(R.id.work_state, WorkLog.shortName(log.jobName(job)) + " · " + state);
-        views.setContentDescription(R.id.work_state, log.jobName(job) + ", " + state);
+        views.setContentDescription(R.id.work_job, log.jobName(job) + ", " + state + ". Tap to change job");
+        // The job and state open a short list of jobs to switch to.
+        Intent choose = new Intent(context, WidgetJobActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        views.setOnClickPendingIntent(R.id.work_job, PendingIntent.getActivity(context, 0, choose,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         // The system counts up from the punch-in, so the widget is never redrawn just to keep time.
         var open = log.openWork(job);
         if (working) {
@@ -60,11 +65,22 @@ public final class WorkWidget extends AppWidgetProvider {
         return views;
     }
 
+    static String state(WorkLog log, int job) {
+        return !log.working(job) ? "Off" : log.running(WorkLog.Kind.PRODUCTIVE, job) ? "Productive"
+                : log.running(WorkLog.Kind.BREAK, job) ? "On break" : "In";
+    }
+
+    /** The job chosen on the widget while it is still active, else the job the work controls use. */
+    static int job(WorkLogStore store, WorkLog log, Workdays work) {
+        int chosen = store.widgetJob();
+        return log.activeJobs().contains(chosen) || log.working(chosen) ? chosen : WorkControls.job(log, work);
+    }
+
     /** A button that highlights while its state runs and dims while it cannot apply; dimmed taps do nothing. */
     private static void button(Context context, RemoteViews views, int id, String action, int job, boolean on,
             int icon, boolean available, String description) {
         views.setImageViewResource(id, icon);
-        views.setInt(id, "setBackgroundResource", on ? R.drawable.widget_button_on : R.drawable.widget_button);
+        views.setInt(id, "setBackgroundResource", on ? R.drawable.widget_work_button_on : R.drawable.widget_work_button);
         views.setInt(id, "setImageAlpha", available ? 255 : 80);
         views.setContentDescription(id, description);
         Intent intent = new Intent(context, WorkActionReceiver.class).setAction(action).putExtra("job", job);

@@ -90,8 +90,8 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
     **Ignore**/**Resume**, the same toggles as the task list. Redrawn after each change and at midnight.
   - **Work punch clock** (2×1, resizable): the job's short name and state with **Punch in/out**,
     **productive** and **break** buttons. A running state is highlighted, buttons that cannot apply yet are
-    dimmed, and the time since punching in counts up on its own. It uses the schedule's job, or the tracker's
-    job without a schedule.
+    dimmed, and the time since punching in counts up on its own. Tap the job name to pick which job the
+    widget acts on; until you pick one it uses the schedule's job, or the tracker's job without a schedule.
 - **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage
   permission). Choose the dates (the month shown, all recorded days, or a range), one job or all, and a format:
   - **Daily summary:** one row per day and job: date, weekday, job, first in, last out, punched, break,

@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fits the 40dp minimum height exactly: a taller layout is scaled down by the launcher, corners and all. -->
+<!-- Fits the 40dp minimum height exactly: a taller layout is scaled down by the launcher, corners and all.
+     Corners are thin and fixed, with the buttons' radius inside the frame's so neither is cut off. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/work_root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:gravity="center" android:padding="3dp"
-    android:background="@drawable/widget_background">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:background="@drawable/widget_work_background">
+    <LinearLayout android:id="@+id/work_job" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:gravity="center" android:paddingStart="4dp" android:paddingEnd="4dp">
         <TextView android:id="@+id/work_state" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:textSize="11sp" android:textStyle="bold" android:textColor="@color/widget_text"
             android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" \u25BE"
+            android:textSize="11sp" android:textColor="@color/widget_text" android:includeFontPadding="false" />
         <Chronometer android:id="@+id/work_clock" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginStart="4dp" android:textSize="11sp" android:textColor="@color/widget_secondary"
             android:includeFontPadding="false" />
@@ -17,12 +20,12 @@
         android:orientation="horizontal" android:paddingTop="2dp">
         <ImageView android:id="@+id/work_punch" android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_weight="1" android:padding="2dp" android:scaleType="fitCenter"
-            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+            android:tint="@color/widget_text" android:background="@drawable/widget_work_button" />
         <ImageView android:id="@+id/work_productive" android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_weight="1" android:layout_marginStart="4dp" android:padding="2dp" android:scaleType="fitCenter"
-            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+            android:tint="@color/widget_text" android:background="@drawable/widget_work_button" />
         <ImageView android:id="@+id/work_break" android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_weight="1" android:layout_marginStart="4dp" android:padding="2dp" android:scaleType="fitCenter"
-            android:tint="@color/widget_text" android:background="@drawable/widget_button" />
+            android:tint="@color/widget_text" android:background="@drawable/widget_work_button" />
     </LinearLayout>
 </LinearLayout>
