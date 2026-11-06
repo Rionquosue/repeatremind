@@ -53,7 +53,7 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   time, which cannot outlast it. Today's worked, productive, unproductive and break time is shown below. Work is saved only when you tap a toggle or edit a day;
   nothing is written on a timer. A shift past midnight stays on the day it started.
 - **Work controls notification:** from half an hour before each scheduled shift until it ends, and for as
-  long as the schedule's job stays punched in, a silent media-style notification shows that job's state with
+  long as the schedule's job stays punched in, a media-style notification with no sound or vibration shows that job's state with
   **Punch in/out**, **productive** and **break** buttons, on the lock screen too. Only the buttons that apply
   are shown, and the time since punching in counts up on its own. If you swipe it away, it comes back
   within ten minutes (checked by an alarm that does not wake the phone). It is redrawn only when something changes,
