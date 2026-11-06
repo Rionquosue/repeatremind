@@ -26,7 +26,12 @@ import java.util.List;
  * ten-minute check puts it back if it was swiped away.
  */
 final class WorkControls {
-    private static final String CHANNEL = "work_controls";
+    /**
+     * Default importance, so the lock screen shows it (Android hides low-importance notifications there), with
+     * its sound, vibration and light turned off. A channel's importance cannot be raised once created, so this
+     * replaces the first, low-importance channel.
+     */
+    private static final String CHANNEL = "work_controls_lock_screen", OLD_CHANNEL = "work_controls";
     /** Task notifications use positive ids and the before-work reminder uses 0. */
     static final int NOTIFICATION = -1;
     static final String PUNCH = "style.spacedragon.repeatremind.PUNCH";
@@ -159,13 +164,17 @@ final class WorkControls {
         return new Notification.Action.Builder(Icon.createWithResource(context, icon), title, pending).build();
     }
 
-    /** Low importance: no sound, vibration or pop-up, but shown in full on the lock screen. */
+    /** No sound, vibration, light or pop-up, but shown in full on the lock screen. */
     private static void ensureChannel(Context context, NotificationManager manager) {
         if (channelReady) return;
+        if (manager.getNotificationChannel(OLD_CHANNEL) != null) manager.deleteNotificationChannel(OLD_CHANNEL);
         if (manager.getNotificationChannel(CHANNEL) == null) {
             NotificationChannel channel = new NotificationChannel(CHANNEL,
-                    context.getString(R.string.work_controls_channel), NotificationManager.IMPORTANCE_LOW);
+                    context.getString(R.string.work_controls_channel), NotificationManager.IMPORTANCE_DEFAULT);
             channel.setDescription("Punch, productive and break buttons during scheduled work hours");
+            channel.setSound(null, null);
+            channel.enableVibration(false);
+            channel.enableLights(false);
             channel.setShowBadge(false);
             channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             manager.createNotificationChannel(channel);
