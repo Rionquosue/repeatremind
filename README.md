@@ -159,8 +159,7 @@ Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installed directly.
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
 sign it with your own private key before installing or distributing. Never commit signing keys.
-The GitHub Actions workflow builds and tests both variants on pushes to main and pull requests.
-It does not publish releases or upload APKs, since unsigned builds cannot be installed.
+Builds, tests and releases are run locally; the repository has no CI workflows.
 Increase `versionName` and `versionCode` for each release you sign and distribute.
 The build downloads tools only on the development machine; the installed app has no network access.
 
@@ -180,6 +179,14 @@ The framework-only `SmokeInstrumentation` additionally exercises editor persiste
 buttons, weekday highlights, missed-history filtering, the work tracker toggles, calendar and day view,
 custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.
-CI runs these device tests on an Android 15 emulator.
+Run them on a device or emulator after `assembleDebug assembleAndroidTest`:
+
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell pm grant style.spacedragon.repeatremind android.permission.POST_NOTIFICATIONS
+adb shell appops set style.spacedragon.repeatremind SCHEDULE_EXACT_ALARM allow
+adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation
+```
 
 The calendar/hourglass launcher icon is a small native vector with an adaptive-icon wrapper.
