@@ -159,7 +159,8 @@ Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installed directly.
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
 sign it with your own private key before installing or distributing. Never commit signing keys.
-Builds, tests and releases are run locally; the repository has no CI workflows.
+The GitHub Actions workflow runs the JVM tests, lint and the device smoke test on pushes to main and
+pull requests, using debug builds. Release APKs are built and signed locally, never in CI.
 Increase `versionName` and `versionCode` for each release you sign and distribute.
 The build downloads tools only on the development machine; the installed app has no network access.
 
