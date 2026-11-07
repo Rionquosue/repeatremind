@@ -46,6 +46,8 @@ jobs:
             adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation | tee smoke-results.txt
             adb logcat -d -b crash > smoke-crash.txt
             cat smoke-crash.txt
+            # Why any app stopped responding during the run, e.g. the launcher on a freshly booted emulator.
+            adb logcat -d -b main -b system | grep -iE -A12 "ANR in " > smoke-anr.txt || true
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-missed.png > smoke-missed.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-custom.png > smoke-custom.png
             adb exec-out run-as style.spacedragon.repeatremind cat cache/smoke-editor.png > smoke-editor.png
@@ -62,5 +64,6 @@ jobs:
           path: |
             smoke-results.txt
             smoke-crash.txt
+            smoke-anr.txt
             smoke-*.png
           if-no-files-found: ignore
