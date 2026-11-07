@@ -277,14 +277,14 @@ public final class SmokeInstrumentation extends Instrumentation {
             await(() -> findText(export, "Recommended import settings") != null && findText(export, "Save CSV") != null,
                     "Export screen shows its options and import settings");
             screenshot("smoke-export.png"); ui(export::finish); waitForIdleSync();
-            await(tracker::hasWindowFocus, "Work tracker is back in front after export");
+            awaitFront(tracker, "Work tracker is back in front after export");
             ActivityMonitor dayMonitor = addMonitor(WorkDayActivity.class.getName(), null, false);
             ui(() -> findText(tracker, String.valueOf(LocalDate.now().getDayOfMonth())).performClick());
             Activity dayView = waitForMonitorWithTimeout(dayMonitor, 15000); removeMonitor(dayMonitor);
             check(dayView != null, "A calendar day opens the day view"); waitForIdleSync();
             await(() -> findText(dayView, "+ Work") != null && findText(dayView, "+ Break") != null,
                     "Day view renders its candle graph and one row of add buttons");
-            await(dayView::hasWindowFocus, "Day view is in front");
+            awaitFront(dayView, "Day view is in front");
             screenshot("smoke-day.png"); ui(dayView::finish); waitForIdleSync();
             ui(() -> findText(tracker, "Schedule").performClick()); waitForIdleSync();
             await(() -> findText(tracker, "Set up schedule") != null || findText(tracker, "Edit schedule") != null,
@@ -356,6 +356,25 @@ public final class SmokeInstrumentation extends Instrumentation {
         long deadline = System.currentTimeMillis() + 5000;
         while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) Thread.sleep(25);
         waitForIdleSync(); check(condition.getAsBoolean(), description);
+    }
+
+    /**
+     * Waits for an activity to have window focus. A system "isn't responding" dialog for another app, such as
+     * a launcher still starting on a fresh emulator, would hold focus, so it is answered with "Wait".
+     */
+    private void awaitFront(Activity activity, String description) throws Exception {
+        long deadline = System.currentTimeMillis() + 10000;
+        while (!activity.hasWindowFocus() && System.currentTimeMillis() < deadline) {
+            android.view.accessibility.AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+            if (root != null && "android".contentEquals(root.getPackageName() == null ? "" : root.getPackageName())) {
+                for (android.view.accessibility.AccessibilityNodeInfo wait : root.findAccessibilityNodeInfosByText("Wait")) {
+                    if (wait.isClickable()) wait.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    else if (wait.getParent() != null) wait.getParent().performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                }
+            }
+            Thread.sleep(100);
+        }
+        waitForIdleSync(); check(activity.hasWindowFocus(), description);
     }
 
     private void shell(String command) throws Exception {

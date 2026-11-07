@@ -64,6 +64,16 @@ final class WorkLogStore {
         return log;
     }
 
+    /** The job chosen on the work widget, or 0 when it follows the schedule. */
+    int widgetJob() { return preferences.getInt("widget_job", 0); }
+
+    /** Saved only when the user picks a job on the widget. */
+    void widgetJob(int job) {
+        if (!preferences.edit().putInt("widget_job", job).commit()) {
+            throw new IllegalStateException("The widget's job could not be saved");
+        }
+    }
+
     void save(WorkLog log) {
         boolean selectionChanged = preferences.getInt("job", WorkLog.FIRST_JOB) != log.selected;
         if (log.dirty.isEmpty() && !log.jobsDirty && !selectionChanged) return;

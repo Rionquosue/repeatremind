@@ -90,8 +90,8 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
     **Ignore**/**Resume**, the same toggles as the task list. Redrawn after each change and at midnight.
   - **Work punch clock** (2×1, resizable): the job's short name and state with **Punch in/out**,
     **productive** and **break** buttons. A running state is highlighted, buttons that cannot apply yet are
-    dimmed, and the time since punching in counts up on its own. It uses the schedule's job, or the tracker's
-    job without a schedule.
+    dimmed, and the time since punching in counts up on its own. Tap the job name to pick which job the
+    widget acts on; until you pick one it uses the schedule's job, or the tracker's job without a schedule.
 - **Export CSV** (in Details) saves a CSV wherever you choose, using Android's own file picker (no storage
   permission). Choose the dates (the month shown, all recorded days, or a range), one job or all, and a format:
   - **Daily summary:** one row per day and job: date, weekday, job, first in, last out, punched, break,
@@ -159,8 +159,8 @@ Set `ANDROID_HOME` or a local untracked `local.properties` containing `sdk.dir=/
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk` and can be installed directly.
 The size-optimized release APK is `app/build/outputs/apk/release/app-release-unsigned.apk`;
 sign it with your own private key before installing or distributing. Never commit signing keys.
-The GitHub Actions workflow builds and tests both variants on pushes to main and pull requests.
-It does not publish releases or upload APKs, since unsigned builds cannot be installed.
+The GitHub Actions workflow runs the JVM tests, lint and the device smoke test on pushes to main and
+pull requests, using debug builds. Release APKs are built and signed locally, never in CI.
 Increase `versionName` and `versionCode` for each release you sign and distribute.
 The build downloads tools only on the development machine; the installed app has no network access.
 
@@ -180,6 +180,14 @@ The framework-only `SmokeInstrumentation` additionally exercises editor persiste
 buttons, weekday highlights, missed-history filtering, the work tracker toggles, calendar and day view,
 custom themes, actual notification actions,
 permissions, and OS alarm delivery on a disposable device.
-CI runs these device tests on an Android 15 emulator.
+Run them on a device or emulator after `assembleDebug assembleAndroidTest`:
+
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell pm grant style.spacedragon.repeatremind android.permission.POST_NOTIFICATIONS
+adb shell appops set style.spacedragon.repeatremind SCHEDULE_EXACT_ALARM allow
+adb shell am instrument -w style.spacedragon.repeatremind.test/style.spacedragon.repeatremind.SmokeInstrumentation
+```
 
 The calendar/hourglass launcher icon is a small native vector with an adaptive-icon wrapper.
