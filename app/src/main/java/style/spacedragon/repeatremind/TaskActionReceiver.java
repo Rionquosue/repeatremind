@@ -8,15 +8,15 @@ import java.time.LocalDate;
 public final class TaskActionReceiver extends BroadcastReceiver {
     static final String COMPLETE = "style.spacedragon.repeatremind.COMPLETE";
     static final String IGNORE = "style.spacedragon.repeatremind.IGNORE";
-    /** From the task widget: set completed or ignored to "value", like the app's toggles. */
+    /** From the task widget: set completed, or ignored for the occurrence, to "value", like the app's toggles. */
     static final String WIDGET_COMPLETE = "style.spacedragon.repeatremind.WIDGET_COMPLETE";
     static final String WIDGET_IGNORE = "style.spacedragon.repeatremind.WIDGET_IGNORE";
 
     @Override public void onReceive(Context context, Intent intent) {
         int id = intent.getIntExtra("task_id", 0);
         if (WIDGET_IGNORE.equals(intent.getAction())) {
-            if (id > 0) Reminders.setIgnored(context, id, intent.getLongExtra("occurrence_id", -1),
-                    intent.getBooleanExtra("value", true));
+            long occurrence = intent.getLongExtra("occurrence_id", -1);
+            if (id > 0 && occurrence > 0) Reminders.setIgnored(context, id, occurrence, intent.getBooleanExtra("value", true));
             return;
         }
         long occurrence = intent.getLongExtra("occurrence_id", -1);

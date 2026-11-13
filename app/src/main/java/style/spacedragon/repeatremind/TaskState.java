@@ -22,7 +22,6 @@ class TaskState {
     boolean followUpEnabled;
     int followUpMinutes = 60;
     boolean completed;
-    boolean ignored;
     /** Reminders silenced for the current occurrence only; the next occurrence starts unsilenced. */
     boolean skipped;
     long nextDue;
@@ -64,9 +63,10 @@ class TaskState {
         return temporary && !today.isBefore(endDate());
     }
 
-    boolean remindersActive() { return hasReminder && enabled && !ignored; }
+    /** An enabled task with a reminder always reminds; Ignore can only silence one occurrence. */
+    boolean remindersActive() { return hasReminder && enabled; }
 
-    /** Whether the current occurrence may still remind: not ignored for that day alone either. */
+    /** Whether the current occurrence may still remind: not ignored for that day. */
     private boolean remindsNow() { return remindersActive() && !skipped; }
 
     long nextAlarm() {
@@ -255,11 +255,6 @@ class TaskState {
     }
 
     boolean ignoreOccurrence(long expectedOccurrence, Instant now) { return ignoreOccurrence(expectedOccurrence, true, now); }
-
-    void setIgnored(boolean value, Instant now) {
-        ignored = value;
-        resetFollowUp(now);
-    }
 
     private void resetFollowUp(Instant now) {
         followUpAt = remindsNow() && !completed && occurrenceStarted && followUpEnabled

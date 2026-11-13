@@ -36,7 +36,7 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
   occurrences keep their original schedule; a new occurrence replaces an older unfinished one.
 - **Ignore** in the list, widget or expanded notification silences that task's reminders for the current
   occurrence only, without marking it complete; the next occurrence reminds as usual. **Resume** undoes it
-  that day. To silence a task until you turn it back on, use the Ignore checkbox in the editor.
+  that day. An enabled task always reminds; to stop its reminders, pause or disable it.
   Swiping away a notification or opening it does not stop follow-ups. Undoing Completed
   resumes follow-ups for an occurrence that has already started, after the configured wait.
 - Tap a task to edit, pause, or delete it. **Theme** selects Light, Dark, Colourblind, or Custom.

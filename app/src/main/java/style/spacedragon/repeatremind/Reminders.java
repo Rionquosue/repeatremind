@@ -178,13 +178,12 @@ final class Reminders {
         });
     }
 
-    /** An occurrence of -1 applies to the task regardless of which occurrence is current. */
+    /** Silences, or restores, reminders for the given occurrence only; a stale occurrence changes nothing. */
     static Data setIgnored(Context context, int id, long occurrence, boolean value) {
         return update(context, false, (data, now) -> {
             Task task = data.task(id);
             if (task == null) return;
-            if (occurrence == -1) task.setIgnored(value, now);
-            else if (!task.ignoreOccurrence(occurrence, value, now)) return;
+            if (!task.ignoreOccurrence(occurrence, value, now)) return;
             data.tasksChanged = true;
             if (value) clear(context, id);
         });
