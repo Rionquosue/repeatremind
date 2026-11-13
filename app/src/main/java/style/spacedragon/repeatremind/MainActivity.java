@@ -238,7 +238,8 @@ public final class MainActivity extends BaseActivity {
                     : title.getPaintFlags() & ~Paint.STRIKE_THRU_TEXT_FLAG);
             ((TextView) card.getChildAt(1)).setText(ScheduleText.describe(task.schedule) + ScheduleText.until(task));
             boolean followUp = task.followUpAt > 0 && task.followUpAt < task.nextDue;
-            String detail = task.ignored ? "Reminders ignored" : task.completed ? "Completed · " + task.occurrenceDate
+            String detail = task.ignored ? "Reminders ignored" : task.skipped && !task.completed
+                    ? "Ignored for " + task.occurrenceDate : task.completed ? "Completed · " + task.occurrenceDate
                     : !task.enabled ? (task.expired(LocalDate.now()) ? "Ended" : "Paused") : !task.hasReminder ? "No reminder"
                     : (followUp ? "Follow-up · " : "Next · ")
                     + Instant.ofEpochMilli(followUp ? task.followUpAt : task.nextDue).atZone(ZoneId.systemDefault())
@@ -256,11 +257,13 @@ public final class MainActivity extends BaseActivity {
             });
             Button ignore = (Button) controls.getChildAt(1);
             ignore.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
-            ignore.setText(task.ignored ? "Resume" : getString(R.string.ignore));
-            ignore.setContentDescription((task.ignored ? "Resume reminders: " : "Ignore reminders: ") + task.title);
-            ignore.setOnClickListener(view -> {
-                act(() -> Reminders.setIgnored(MainActivity.this, task.id, -1, !task.ignored));
-            });
+            // Ignore silences this occurrence only; Resume also lifts an ignore set in the editor.
+            boolean silenced = task.ignored || task.skipped;
+            ignore.setText(silenced ? "Resume" : getString(R.string.ignore));
+            ignore.setContentDescription((silenced ? "Resume reminders: " : "Ignore today's reminders: ") + task.title);
+            ignore.setOnClickListener(view -> act(() -> task.ignored
+                    ? Reminders.setIgnored(MainActivity.this, task.id, -1, false)
+                    : Reminders.setIgnored(MainActivity.this, task.id, task.occurrenceId, !task.skipped)));
             card.setOnClickListener(view -> edit(task.id));
             return card;
         }

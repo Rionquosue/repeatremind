@@ -23,6 +23,8 @@ class TaskState {
     int followUpMinutes = 60;
     boolean completed;
     boolean ignored;
+    /** Reminders silenced for the current occurrence only; the next occurrence starts unsilenced. */
+    boolean skipped;
     long nextDue;
     long followUpAt;
     LocalDate occurrenceDate;
@@ -64,8 +66,12 @@ class TaskState {
 
     boolean remindersActive() { return hasReminder && enabled && !ignored; }
 
+    /** Whether the current occurrence may still remind: not ignored for that day alone either. */
+    private boolean remindsNow() { return remindersActive() && !skipped; }
+
     long nextAlarm() {
         if (!remindersActive()) return Long.MAX_VALUE;
+        if (skipped) return nextDue;
         return !completed && followUpEnabled && followUpAt > 0
                 ? Math.min(nextDue, followUpAt) : nextDue;
     }
@@ -73,7 +79,7 @@ class TaskState {
     /** The next base reminder worth waking for; a completed occurrence skips to the one after it. */
     long nextReminder(ZoneId zone) {
         if (!remindersActive()) return Long.MAX_VALUE;
-        if (completed && occurrenceDate != null
+        if ((completed || skipped) && occurrenceDate != null
                 && !Instant.ofEpochMilli(nextDue).atZone(zone).toLocalDate().isAfter(occurrenceDate)) {
             Instant dayEnd = occurrenceDate.plusDays(1).atStartOfDay(zone).toInstant().minusMillis(1);
             return Recurrence.nextAfter(schedule, dayEnd, zone).toEpochMilli();
@@ -83,7 +89,7 @@ class TaskState {
 
     /** The pending follow-up, which needs no exact alarm. */
     long nextFollowUp() {
-        return remindersActive() && !completed && followUpEnabled && followUpAt > 0 ? followUpAt : Long.MAX_VALUE;
+        return remindsNow() && !completed && followUpEnabled && followUpAt > 0 ? followUpAt : Long.MAX_VALUE;
     }
 
     void resetSchedule(Instant now, ZoneId zone) {
@@ -97,6 +103,7 @@ class TaskState {
         occurrenceDate = date;
         occurrenceId++;
         occurrenceStarted = false;
+        skipped = false;
         completed = history.getOrDefault(date, false);
         followUpAt = 0;
     }
@@ -167,6 +174,7 @@ class TaskState {
             occurrenceDate = today;
             occurrenceId++;
             occurrenceStarted = false;
+            skipped = false;
             followUpAt = 0;
             result.changed = true;
         }
@@ -202,13 +210,13 @@ class TaskState {
             boolean firstDelivery = date.equals(occurrenceDate) && !occurrenceStarted;
             if (date.equals(occurrenceDate)) occurrenceStarted = true;
             nextDue = Recurrence.nextAfter(schedule, now, zone).toEpochMilli();
-            if (firstDelivery && remindersActive() && !completed) {
+            if (firstDelivery && remindsNow() && !completed) {
                 result.notify = true;
                 resetFollowUp(now);
             }
             result.changed = true;
         }
-        if (!remindersActive() || completed || !followUpEnabled) {
+        if (!remindsNow() || completed || !followUpEnabled) {
             if (followUpAt != 0) { followUpAt = 0; result.changed = true; }
         } else if (followUpAt > 0 && followUpAt <= millis && !result.notify) {
             result.notify = true;
@@ -238,11 +246,15 @@ class TaskState {
         return true;
     }
 
-    boolean ignoreOccurrence(long expectedOccurrence, Instant now) {
+    /** Silences, or with false restores, reminders for the current occurrence only, if it is still the one meant. */
+    boolean ignoreOccurrence(long expectedOccurrence, boolean value, Instant now) {
         if (expectedOccurrence != occurrenceId) return false;
-        setIgnored(true, now);
+        skipped = value;
+        resetFollowUp(now);
         return true;
     }
+
+    boolean ignoreOccurrence(long expectedOccurrence, Instant now) { return ignoreOccurrence(expectedOccurrence, true, now); }
 
     void setIgnored(boolean value, Instant now) {
         ignored = value;
@@ -250,7 +262,7 @@ class TaskState {
     }
 
     private void resetFollowUp(Instant now) {
-        followUpAt = remindersActive() && !completed && occurrenceStarted && followUpEnabled
+        followUpAt = remindsNow() && !completed && occurrenceStarted && followUpEnabled
                 ? now.toEpochMilli() + followUpMinutes * 60000L : 0;
     }
 

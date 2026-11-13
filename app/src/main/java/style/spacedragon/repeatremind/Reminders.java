@@ -184,7 +184,7 @@ final class Reminders {
             Task task = data.task(id);
             if (task == null) return;
             if (occurrence == -1) task.setIgnored(value, now);
-            else if (!task.ignoreOccurrence(occurrence, now)) return;
+            else if (!task.ignoreOccurrence(occurrence, value, now)) return;
             data.tasksChanged = true;
             if (value) clear(context, id);
         });

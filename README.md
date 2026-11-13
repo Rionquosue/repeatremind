@@ -34,8 +34,9 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
 - Enable **Send additional reminders if not complete** and choose a wait in minutes, hours,
   or days (1 minute to 365 days). Each delivered reminder starts another wait. Regular calendar
   occurrences keep their original schedule; a new occurrence replaces an older unfinished one.
-- **Ignore** in the list or expanded notification silences all reminders for that task until
-  **Resume** is selected, without marking it complete. The editor also has an Ignore checkbox.
+- **Ignore** in the list, widget or expanded notification silences that task's reminders for the current
+  occurrence only, without marking it complete; the next occurrence reminds as usual. **Resume** undoes it
+  that day. To silence a task until you turn it back on, use the Ignore checkbox in the editor.
   Swiping away a notification or opening it does not stop follow-ups. Undoing Completed
   resumes follow-ups for an occurrence that has already started, after the configured wait.
 - Tap a task to edit, pause, or delete it. **Theme** selects Light, Dark, Colourblind, or Custom.

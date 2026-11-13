@@ -50,9 +50,12 @@ public final class TaskWidgetService extends RemoteViewsService {
                     .putExtra("task_id", task.id).putExtra("occurrence_id", task.occurrenceId)
                     .putExtra("occurrence_date", task.occurrenceDate.toString()).putExtra("value", !task.completed));
             row.setViewVisibility(R.id.task_ignore, task.hasReminder ? android.view.View.VISIBLE : android.view.View.GONE);
-            row.setTextViewText(R.id.task_ignore, task.ignored ? "Resume" : context.getString(R.string.ignore));
+            // Ignore silences this occurrence only; Resume also lifts an ignore set in the editor.
+            boolean silenced = task.ignored || task.skipped;
+            row.setTextViewText(R.id.task_ignore, silenced ? "Resume" : context.getString(R.string.ignore));
             row.setOnClickFillInIntent(R.id.task_ignore, new Intent(TaskActionReceiver.WIDGET_IGNORE)
-                    .putExtra("task_id", task.id).putExtra("value", !task.ignored));
+                    .putExtra("task_id", task.id).putExtra("value", !silenced)
+                    .putExtra("occurrence_id", task.ignored ? -1L : task.occurrenceId));
             return row;
         }
 
@@ -61,6 +64,7 @@ public final class TaskWidgetService extends RemoteViewsService {
             ZoneId zone = ZoneId.systemDefault();
             boolean followUp = task.followUpAt > 0 && task.followUpAt < task.nextDue;
             if (task.ignored) return "Reminders ignored";
+            if (task.skipped && !task.completed) return "Ignored for " + task.occurrenceDate;
             if (task.completed) return "Completed · " + task.occurrenceDate;
             if (!task.enabled) return task.expired(LocalDate.now()) ? "Ended" : "Paused";
             if (!task.hasReminder) return ScheduleText.describe(task.schedule);

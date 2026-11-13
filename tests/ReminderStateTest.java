@@ -62,14 +62,25 @@ public final class ReminderStateTest {
         TaskState t = task(); update(t, "2026-01-01T08:00:00Z"); update(t, "2026-01-01T09:00:00Z");
         long token = t.occurrenceId;
         check(t.ignoreOccurrence(token, at("2026-01-01T09:02:00Z")), "Ignore action accepted");
-        check(t.ignored && !t.completed && t.followUpAt == 0, "Ignore silences without completing");
+        check(t.skipped && !t.ignored && !t.completed && t.followUpAt == 0, "Ignore silences that day without completing");
+        check(t.nextFollowUp() == Long.MAX_VALUE, "No follow-up for an ignored day");
+        equal(t.nextReminder(UTC), "2026-01-02T09:00:00Z", "The next day's reminder is still scheduled");
+        check(!update(t, "2026-01-01T09:30:00Z").notify, "Nothing more that day");
+        check(update(t, "2026-01-02T09:00:00Z").notify && !t.skipped, "The next occurrence reminds again");
+        check(!t.ignoreOccurrence(token, at("2026-01-02T09:01:00Z")) && !t.skipped, "Stale Ignore rejected");
+        // Resume on the same day restores that day's follow-ups.
+        long today = t.occurrenceId;
+        t.ignoreOccurrence(today, at("2026-01-02T09:02:00Z"));
+        check(t.ignoreOccurrence(today, false, at("2026-01-02T09:03:00Z")) && !t.skipped, "Resume accepted");
+        equal(t.nextFollowUp(), "2026-01-02T09:18:00Z", "Resume starts a new interval");
+        // Ignoring until re-enabled, from the editor, still lasts across occurrences.
+        t.setIgnored(true, at("2026-01-02T10:00:00Z"));
         check(t.nextAlarm() == Long.MAX_VALUE, "Ignored task needs no OS wake-up");
         check(!update(t, "2026-02-02T12:00:00Z").notify && t.ignored && !t.completed,
-                "Ignore persists across normal recurrence dates");
+                "Ignore until re-enabled persists across normal recurrence dates");
         t.setIgnored(false, at("2026-02-02T12:00:00Z"));
-        equal(t.nextAlarm(), "2026-02-02T12:15:00Z", "Resume starts a new interval");
+        equal(t.nextAlarm(), "2026-02-02T12:15:00Z", "Re-enabling starts a new interval");
         check(update(t, "2026-02-02T12:15:00Z").notify, "Resumed follow-up fires");
-        check(!t.ignoreOccurrence(token, at("2026-02-02T12:16:00Z")) && !t.ignored, "Stale Ignore rejected");
     }
 
     private static void disabledReminders() {

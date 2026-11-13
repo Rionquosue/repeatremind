@@ -15,7 +15,8 @@ public final class TaskActionReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
         int id = intent.getIntExtra("task_id", 0);
         if (WIDGET_IGNORE.equals(intent.getAction())) {
-            if (id > 0) Reminders.setIgnored(context, id, -1, intent.getBooleanExtra("value", true));
+            if (id > 0) Reminders.setIgnored(context, id, intent.getLongExtra("occurrence_id", -1),
+                    intent.getBooleanExtra("value", true));
             return;
         }
         long occurrence = intent.getLongExtra("occurrence_id", -1);
