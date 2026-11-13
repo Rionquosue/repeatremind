@@ -137,10 +137,10 @@ public final class SmokeInstrumentation extends Instrumentation {
             check(!store.load().get(0).completed, "Completed button can undo completion");
 
             JSONObject legacy = task.toJson();
-            for (String key : new String[]{"followUpEnabled", "followUpMinutes", "completed", "ignored",
+            for (String key : new String[]{"followUpEnabled", "followUpMinutes", "completed", "skipped",
                     "followUpAt", "occurrenceDate", "occurrenceId", "occurrenceStarted", "history", "historyThrough"}) legacy.remove(key);
             Task migrated = Task.fromJson(legacy);
-            check(!migrated.completed && !migrated.ignored && !migrated.followUpEnabled
+            check(!migrated.completed && !migrated.skipped && !migrated.followUpEnabled
                     && migrated.followUpMinutes == 60 && migrated.title.equals(task.title), "Old tasks migrate safely");
 
             // Both tasks due at once must post in a single wake-up, even with the activity closed.
@@ -178,9 +178,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             Notification other = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == second.id)
                     .findFirst().orElseThrow().getNotification();
             other.actions[1].actionIntent.send();
-            await(() -> store.load().get(1).ignored, "Notification Ignore action persisted");
-            check(!store.load().get(1).completed && store.load().get(1).nextAlarm() == Long.MAX_VALUE,
-                    "Ignore silences without completion");
+            await(() -> store.load().get(1).skipped, "Notification Ignore action persisted");
+            check(!store.load().get(1).completed && store.load().get(1).nextFollowUp() == Long.MAX_VALUE, "Ignore silences that day without completion");
 
             // Exercise the real OS delivery path, with no activity running.
             notifications.cancelAll();
@@ -205,7 +204,7 @@ public final class SmokeInstrumentation extends Instrumentation {
             Notification current = Arrays.stream(notifications.getActiveNotifications()).filter(n -> n.getId() == task.id)
                     .findFirst().orElseThrow().getNotification();
             current.actions[1].actionIntent.send();
-            await(() -> store.load().get(0).ignored, "Current notification Ignore works");
+            await(() -> store.load().get(0).skipped, "Current notification Ignore works");
             notifications.cancelAll();
             for (int theme = 0; theme < 3; theme++) {
                 store.theme(theme);
@@ -216,7 +215,7 @@ public final class SmokeInstrumentation extends Instrumentation {
                 check(findText(themed, "Completed") instanceof Button, "Theme " + theme + " has completion control");
                 if (theme == 0) {
                     ui(() -> findText(themed, "Resume").performClick()); waitForIdleSync();
-                    check(!store.load().get(0).ignored && store.load().get(0).followUpAt > 0, "Resume restores follow-ups");
+                    check(!store.load().get(0).skipped && store.load().get(0).followUpAt > 0, "Resume restores follow-ups");
                 }
                 screenshot("smoke-theme-" + theme + ".png");
                 ui(themed::finish); waitForIdleSync();

@@ -35,8 +35,7 @@ public final class TaskEditorActivity extends BaseActivity {
     private Task task;
     private EditText title, reminderText, intervalInput, temporaryLength;
     private Switch enabledSwitch, followUpSwitch;
-    private CheckBox reminderCheck, ignoredSwitch, temporaryCheck;
-    private boolean originalIgnored;
+    private CheckBox reminderCheck, temporaryCheck;
     private Spinner repeat, month, intervalUnit, temporarySpan;
     private NumberPicker day;
     private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields, followUpFields, temporaryFields;
@@ -57,7 +56,6 @@ public final class TaskEditorActivity extends BaseActivity {
                         .filter(t -> t.id == id).findFirst().orElse(null);
                 if (task == null) { finish(); return; }
             }
-            originalIgnored = state == null ? task.ignored : state.getBoolean("originalIgnored", task.ignored);
             render();
         } catch (JSONException | RuntimeException e) {
             failOpen("This task could not be opened.");
@@ -186,9 +184,6 @@ public final class TaskEditorActivity extends BaseActivity {
         reminderFields.addView(followUpFields);
         followUpSwitch.setOnCheckedChangeListener((button, checked) ->
                 followUpFields.setVisibility(checked ? View.VISIBLE : View.GONE));
-        ignoredSwitch = checkBox(R.string.ignore_reminders, task.ignored);
-        ignoredSwitch.setMinHeight(dp(64));
-        reminderFields.addView(ignoredSwitch);
         form.addView(reminderFields);
         reminderFields.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
         reminderCheck.setOnCheckedChangeListener((button, checked) ->
@@ -278,7 +273,7 @@ public final class TaskEditorActivity extends BaseActivity {
         try { task.temporaryLength = Integer.parseInt(temporaryLength.getText().toString().trim()); }
         catch (NumberFormatException e) { task.temporaryLength = 0; }
         task.followUpEnabled = followUpSwitch.isChecked();
-        task.followUpMinutes = intervalMinutes(); task.ignored = ignoredSwitch.isChecked();
+        task.followUpMinutes = intervalMinutes();
         task.schedule.day = day.getValue(); task.schedule.month = month.getSelectedItemPosition() + 1;
         task.schedule.monthDays = 0;
         for (int i = 0; i < 3; i++) if (markers[i].isChecked()) task.schedule.monthDays |= 1 << i;
@@ -325,8 +320,6 @@ public final class TaskEditorActivity extends BaseActivity {
                 }
                 current.configureFrom(task, now, ZoneId.systemDefault()); // Validates the edit.
                 current.title = task.title; current.reminder = task.reminder;
-                // Preserve a notification action received while this form was open.
-                if (task.ignored != originalIgnored) current.setIgnored(task.ignored, now);
                 data.tasksChanged = true;
                 // A showing notification has the old text or settings; the next reminder posts a fresh one.
                 Reminders.clear(this, current.id);
@@ -355,7 +348,6 @@ public final class TaskEditorActivity extends BaseActivity {
         super.onSaveInstanceState(state);
         if (title == null) return;
         capture();
-        state.putBoolean("originalIgnored", originalIgnored);
         try { state.putString("draft", task.toJson().toString()); }
         catch (JSONException e) { throw new IllegalStateException(e); }
     }
