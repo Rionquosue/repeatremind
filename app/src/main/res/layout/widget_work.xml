@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Fits the 40dp minimum height exactly: a taller layout is scaled down by the launcher, corners and all.
-     Corners are thin and fixed, with the buttons' radius inside the frame's so neither is cut off. -->
+     Corners are thin and fixed, with the buttons' radius inside the frame's so neither is cut off.
+     Android 12+ launchers clip a widget to the system's large corner radius unless its background view is
+     @android:id/background and clips to its own outline, so the frame does both to keep its 4dp corners. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/work_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:id="@android:id/background" android:clipToOutline="true"
+    android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:gravity="center" android:padding="3dp"
     android:background="@drawable/widget_work_background">
     <LinearLayout android:id="@+id/work_job" android:layout_width="match_parent" android:layout_height="wrap_content"
