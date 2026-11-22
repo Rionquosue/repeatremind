@@ -4,7 +4,9 @@ import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Intent;
+import android.media.RingtoneManager;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -36,6 +38,9 @@ public final class TaskEditorActivity extends BaseActivity {
     private EditText title, reminderText, intervalInput, temporaryLength;
     private Switch enabledSwitch, followUpSwitch;
     private CheckBox reminderCheck, temporaryCheck;
+    private Switch audibleSwitch;
+    private Button soundButton;
+    private static final int PICK_SOUND = 1;
     private Spinner repeat, month, intervalUnit, temporarySpan;
     private NumberPicker day;
     private LinearLayout weekdays, biweekly, calendarDays, monthFields, reminderFields, followUpFields, temporaryFields;
@@ -184,6 +189,16 @@ public final class TaskEditorActivity extends BaseActivity {
         reminderFields.addView(followUpFields);
         followUpSwitch.setOnCheckedChangeListener((button, checked) ->
                 followUpFields.setVisibility(checked ? View.VISIBLE : View.GONE));
+
+        audibleSwitch = new Switch(this);
+        audibleSwitch.setText(R.string.audible_alarm); audibleSwitch.setTextColor(palette.text);
+        audibleSwitch.setMinHeight(dp(72)); audibleSwitch.setChecked(task.audible);
+        reminderFields.addView(audibleSwitch);
+        soundButton = button(soundLabel(), this::pickSound);
+        soundButton.setVisibility(task.audible ? View.VISIBLE : View.GONE);
+        reminderFields.addView(soundButton);
+        audibleSwitch.setOnCheckedChangeListener((button, checked) ->
+                soundButton.setVisibility(checked ? View.VISIBLE : View.GONE));
         form.addView(reminderFields);
         reminderFields.setVisibility(task.hasReminder ? View.VISIBLE : View.GONE);
         reminderCheck.setOnCheckedChangeListener((button, checked) ->
@@ -273,6 +288,7 @@ public final class TaskEditorActivity extends BaseActivity {
         try { task.temporaryLength = Integer.parseInt(temporaryLength.getText().toString().trim()); }
         catch (NumberFormatException e) { task.temporaryLength = 0; }
         task.followUpEnabled = followUpSwitch.isChecked();
+        task.audible = audibleSwitch.isChecked();
         task.followUpMinutes = intervalMinutes();
         task.schedule.day = day.getValue(); task.schedule.month = month.getSelectedItemPosition() + 1;
         task.schedule.monthDays = 0;
@@ -286,6 +302,29 @@ public final class TaskEditorActivity extends BaseActivity {
             return value >= 1 && value <= TaskState.MAX_FOLLOW_UP_MINUTES ? (int) value : 0;
         } catch (NumberFormatException e) { return 0; }
     }
+
+    /** Android's own sound picker, listing alarm and notification sounds; the default is the alarm sound. */
+    private void pickSound() {
+        Intent pick = new Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM | RingtoneManager.TYPE_NOTIFICATION)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Reminder sound")
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, Settings.System.DEFAULT_ALARM_ALERT_URI)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, TaskSounds.uri(task));
+        try { startActivityForResult(pick, PICK_SOUND); }
+        catch (android.content.ActivityNotFoundException e) { message("This device has no sound picker"); }
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_SOUND || result != RESULT_OK || data == null) return;
+        android.net.Uri picked = data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
+        task.sound = picked == null || picked.equals(Settings.System.DEFAULT_ALARM_ALERT_URI) ? "" : picked.toString();
+        if (soundButton != null) soundButton.setText(soundLabel());
+    }
+
+    private String soundLabel() { return "Sound: " + TaskSounds.title(this, TaskSounds.uri(task)); }
 
     private void save() {
         // A second tap queued before finish() takes effect must not save (or create) the task again.

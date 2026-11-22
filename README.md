@@ -34,6 +34,10 @@ The app has three rooms, switched with the icon bar at the bottom: **Reminders**
 - Enable **Send additional reminders if not complete** and choose a wait in minutes, hours,
   or days (1 minute to 365 days). Each delivered reminder starts another wait. Regular calendar
   occurrences keep their original schedule; a new occurrence replaces an older unfinished one.
+- **Audible alarm** in the task editor makes that task's reminders and follow-ups play a sound at alarm
+  volume, so they are heard with the ringer silenced. **Sound** opens Android's own picker, listing alarm and
+  notification sounds; the default is the system alarm sound. Each sound gets its own notification channel
+  ("Audible reminders · <sound>"), shared by the tasks using it and removed when none do.
 - **Ignore** in the list, widget or expanded notification silences that task's reminders for the current
   occurrence only, without marking it complete; the next occurrence reminds as usual. **Resume** undoes it
   that day. An enabled task always reminds; to stop its reminders, pause or disable it.

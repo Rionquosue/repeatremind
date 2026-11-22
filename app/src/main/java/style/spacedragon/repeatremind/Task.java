@@ -18,7 +18,8 @@ final class Task extends TaskState {
         return new JSONObject().put("id", id).put("title", title).put("reminder", reminder)
                 .put("hasReminder", hasReminder).put("enabled", enabled).put("nextDue", nextDue)
                 .put("followUpEnabled", followUpEnabled).put("followUpMinutes", followUpMinutes)
-                .put("completed", completed).put("skipped", skipped).put("followUpAt", followUpAt)
+                .put("completed", completed).put("skipped", skipped)
+                .put("audible", audible).put("sound", sound).put("followUpAt", followUpAt)
                 .put("occurrenceDate", occurrenceDate == null ? "" : occurrenceDate.toString())
                 .put("occurrenceId", occurrenceId).put("occurrenceStarted", occurrenceStarted)
                 .put("historyThrough", historyThrough == null ? "" : historyThrough.toString())
@@ -45,6 +46,8 @@ final class Task extends TaskState {
         t.followUpMinutes = json.optInt("followUpMinutes", 60);
         t.completed = json.optBoolean("completed", false);
         t.skipped = json.optBoolean("skipped", false);
+        t.audible = json.optBoolean("audible", false);
+        t.sound = json.optString("sound", "");
         t.followUpAt = json.optLong("followUpAt", 0);
         t.occurrenceId = json.optLong("occurrenceId", 0);
         t.occurrenceStarted = json.optBoolean("occurrenceStarted", false);
