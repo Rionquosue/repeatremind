@@ -206,6 +206,14 @@ public final class SmokeInstrumentation extends Instrumentation {
             current.actions[1].actionIntent.send();
             await(() -> store.load().get(0).skipped, "Current notification Ignore works");
             notifications.cancelAll();
+            Task loud = store.load().get(0); loud.audible = true;
+            String soundChannel = TaskSounds.channel(context, loud);
+            android.app.NotificationChannel created = notifications.getNotificationChannel(soundChannel);
+            check(created != null && created.getAudioAttributes().getUsage() == android.media.AudioAttributes.USAGE_ALARM
+                    && android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI.equals(created.getSound()),
+                    "Audible reminders get an alarm-volume channel with the default alarm sound");
+            TaskSounds.prune(context, store.load());
+            check(notifications.getNotificationChannel(soundChannel) == null, "Sound channels no task uses are removed");
             for (int theme = 0; theme < 3; theme++) {
                 store.theme(theme);
                 Activity themed = startActivitySync(new Intent(context, MainActivity.class)

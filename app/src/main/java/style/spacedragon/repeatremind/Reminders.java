@@ -100,6 +100,7 @@ final class Reminders {
             refresh(context, data, now, zone, false, due, workDue);
         }
         store.save(data.tasks, data.tasksChanged, data.work, data.workChanged);
+        if (data.tasksChanged) TaskSounds.prune(context, data.tasks);
         boolean allowed = allowed(context);
         if (allowed) {
             ensureChannel(context);
@@ -233,7 +234,9 @@ final class Reminders {
         long stale = next.atStartOfDay(zone).toInstant().toEpochMilli() - now.toEpochMilli();
         PendingIntent open = PendingIntent.getActivity(context, task.id, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification notification = new Notification.Builder(context, CHANNEL)
+        // An audible task posts on its sound's channel, as an alarm, so Do Not Disturb's alarm setting applies.
+        String channel = task.audible ? TaskSounds.channel(context, task) : CHANNEL;
+        Notification notification = new Notification.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_notification).setContentTitle(task.title)
                 .setContentText(task.reminder).setStyle(new Notification.BigTextStyle().bigText(task.reminder))
                 .setContentIntent(open).setAutoCancel(true).setTimeoutAfter(Math.max(1, stale))
@@ -242,7 +245,7 @@ final class Reminders {
                         android.R.drawable.checkbox_on_background))
                 .addAction(action(context, task, TaskActionReceiver.IGNORE, R.string.ignore,
                         android.R.drawable.ic_menu_close_clear_cancel))
-                .setCategory(Notification.CATEGORY_REMINDER).build();
+                .setCategory(task.audible ? Notification.CATEGORY_ALARM : Notification.CATEGORY_REMINDER).build();
         try {
             context.getSystemService(NotificationManager.class).notify(task.id, notification);
         } catch (SecurityException ignored) {

@@ -22,6 +22,10 @@ class TaskState {
     boolean followUpEnabled;
     int followUpMinutes = 60;
     boolean completed;
+    /** Reminders play a sound at alarm volume, the chosen one or the default alarm when {@link #sound} is empty. */
+    boolean audible;
+    /** The picked sound's URI, as text; empty for the default alarm sound. */
+    String sound = "";
     /** Reminders silenced for the current occurrence only; the next occurrence starts unsilenced. */
     boolean skipped;
     long nextDue;
@@ -271,6 +275,8 @@ class TaskState {
         enabled = settings.enabled;
         followUpEnabled = settings.followUpEnabled;
         followUpMinutes = settings.followUpMinutes;
+        audible = settings.audible;
+        sound = settings.sound == null ? "" : settings.sound;
         temporary = settings.temporary;
         temporaryLength = settings.temporaryLength;
         temporarySpan = settings.temporarySpan;

@@ -23,6 +23,7 @@ public final class ReminderStateTest {
         validation();
         temporaryTasks();
         wakeupsAndStorage();
+        audibleSettings();
         System.out.println("PASS: " + assertions + " reminder state assertions");
     }
 
@@ -380,6 +381,19 @@ public final class ReminderStateTest {
         t.historyThrough = LocalDate.of(2026, 1, 4); t.pruneCompleted();
         check(t.history.size() == 2 && Boolean.FALSE.equals(t.history.get(LocalDate.of(2026, 1, 1)))
                 && Boolean.TRUE.equals(t.history.get(LocalDate.of(2026, 1, 5))), "Prune keeps missed and upcoming days");
+    }
+
+    private static void audibleSettings() {
+        TaskState t = task(); update(t, "2026-01-01T08:00:00Z");
+        check(!t.audible && t.sound.isEmpty(), "Reminders are not audible until chosen");
+        TaskState settings = task(); settings.audible = true; settings.sound = "content://media/internal/audio/media/7";
+        long occurrence = t.occurrenceId;
+        t.configureFrom(settings, at("2026-01-01T08:01:00Z"), UTC);
+        check(t.audible && t.sound.equals(settings.sound) && t.occurrenceId == occurrence,
+                "Editing takes the sound without resetting the occurrence");
+        settings.audible = false; settings.sound = null;
+        t.configureFrom(settings, at("2026-01-01T08:02:00Z"), UTC);
+        check(!t.audible && t.sound.isEmpty(), "A missing sound becomes the default");
     }
 
     private static TaskState task() {
